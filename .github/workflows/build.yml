@@ -1,0 +1,68 @@
+name: Build
+
+# 三平台各自在对应 OS 上安装依赖并打包，确保 sharp / koffi / node-pty /
+# node-addon-require-builtin / landlock 等可选原生依赖按目标平台正确安装。
+# 之前在 macOS 上 cross-build Windows/Linux 会缺失目标平台的原生二进制，
+# 导致安装包启动即失败。此工作流解决该问题。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+            artifact: mac
+          - os: windows-latest
+            script: dist:win
+            artifact: win
+          - os: ubuntu-latest
+            script: dist:linux
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # 在目标平台原生安装，optionalDependencies 会拉取本平台的原生模块
+        run: npm ci
+
+      - name: Build ${{ matrix.os }}
+        run: npm run ${{ matrix.script }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify native modules packaged
+        run: node scripts/verify-native.mjs
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-desktop-${{ matrix.artifact }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest*.yml
+            release/builder-debug.yml
+          if-no-files-found: error
+          retention-days: 30

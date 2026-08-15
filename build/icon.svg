@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#23264a"/>
+      <stop offset="1" stop-color="#0a0c18"/>
+    </linearGradient>
+    <linearGradient id="ac" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7d98ff"/>
+      <stop offset="1" stop-color="#4d6bfe"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.65">
+      <stop offset="0" stop-color="#4d6bfe" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#4d6bfe" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <rect x="24" y="24" width="976" height="976" rx="210" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="4"/>
+  <circle cx="512" cy="460" r="330" fill="url(#glow)"/>
+  <g stroke="url(#ac)" stroke-width="30" stroke-linecap="round" opacity="0.9">
+    <line x1="512" y1="512" x2="276" y2="330"/>
+    <line x1="512" y1="512" x2="748" y2="330"/>
+    <line x1="512" y1="512" x2="276" y2="694"/>
+    <line x1="512" y1="512" x2="748" y2="694"/>
+  </g>
+  <circle cx="512" cy="512" r="108" fill="url(#ac)"/>
+  <circle cx="276" cy="330" r="56" fill="url(#ac)"/>
+  <circle cx="748" cy="330" r="56" fill="url(#ac)"/>
+  <circle cx="276" cy="694" r="56" fill="url(#ac)"/>
+  <circle cx="748" cy="694" r="56" fill="url(#ac)"/>
+  <circle cx="512" cy="512" r="40" fill="#0e1330"/>
+  <circle cx="276" cy="330" r="20" fill="#0e1330"/>
+  <circle cx="748" cy="330" r="20" fill="#0e1330"/>
+  <circle cx="276" cy="694" r="20" fill="#0e1330"/>
+  <circle cx="748" cy="694" r="20" fill="#0e1330"/>
+</svg>

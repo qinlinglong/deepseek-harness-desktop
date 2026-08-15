@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <title>悬浮球</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { background: transparent; overflow: hidden; height: 100%; }
+    body { display: flex; align-items: center; justify-content: center; }
+    #bubble {
+      position: relative;
+      width: 52px; height: 52px; border-radius: 50%; cursor: grab;
+      background: radial-gradient(circle at 30% 28%, #1c2244, #0f1326 72%);
+      border: 2px solid rgba(125, 152, 255, .55);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .45);
+      user-select: none;
+    }
+    #bubble::before {
+      content: '';
+      position: absolute; inset: 7px;
+      border-radius: 50%;
+      background-size: contain; background-position: center; background-repeat: no-repeat;
+      background-image: var(--bubble-icon, none);
+      -webkit-mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
+              mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
+    }
+    #bubble:active { cursor: grabbing; }
+    #bubble.dragging {
+      transform: scale(1.12);
+      border-color: rgba(125, 152, 255, .9);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .55);
+    }
+  </style>
+</head>
+<body>
+  <div id="bubble"></div>
+  <script>
+    const b = document.getElementById('bubble')
+
+    window.dshFloat.onIcon((url) => {
+      if (url) b.style.setProperty('--bubble-icon', `url(${url})`)
+    })
+
+    let held = false
+    let dragged = false
+    let armed = false
+    let armTimer = null
+
+    const ARM_DELAY = 220
+
+    function cancelDrag() {
+      held = false
+      dragged = false
+      armed = false
+      if (armTimer) { clearTimeout(armTimer); armTimer = null }
+      b.classList.remove('dragging')
+      window.dshFloat.dragEnd()
+    }
+
+    b.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      held = true
+      dragged = false
+      armed = false
+      if (armTimer) clearTimeout(armTimer)
+      armTimer = setTimeout(() => { armed = true }, ARM_DELAY)
+      window.dshFloat.dragStart()
+      try { b.setPointerCapture(e.pointerId) } catch (_) {}
+    })
+
+    window.addEventListener('pointermove', () => {
+      if (!held) return
+      if (!dragged && armed) {
+        dragged = true
+        b.classList.add('dragging')
+      }
+      if (dragged) window.dshFloat.dragMove()
+    })
+
+    window.addEventListener('pointerup', (e) => {
+      if (e.button !== 0) {
+        cancelDrag()
+        return
+      }
+      const wasDrag = dragged
+      try { b.releasePointerCapture() } catch (_) {}
+      cancelDrag()
+      if (!wasDrag) window.dshFloat.toggleMini()
+    })
+    window.addEventListener('pointercancel', cancelDrag)
+    // 覆盖整个悬浮球窗口（含边缘透明区），右键统一弹菜单，杜绝误触退出
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      window.dshFloat.showMenu()
+    })  </script>
+</body>
+</html>

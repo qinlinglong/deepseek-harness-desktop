@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-src http: https:" />
+  <title>DeepSeek Harness</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { background: #0b0d16; display: flex; flex-direction: column; overflow: hidden; }
+    .bar {
+      height: 38px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 8px;
+      background: #101423; border-bottom: 1px solid #232a47; -webkit-app-region: drag;
+      user-select: none;
+    }
+    .bar .title {
+      flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+      font-size: 12px; font-weight: 600; color: #8a93b5; padding-left: 4px;
+    }
+    .bar .btn {
+      -webkit-app-region: no-drag; width: 28px; height: 26px; border: 0; border-radius: 7px;
+      background: transparent; color: #cdd3ea; cursor: pointer; line-height: 1;
+      display: flex; align-items: center; justify-content: center; padding: 0;
+    }
+    .bar .btn svg { display: block; }
+    .bar .btn:hover { background: #262d52; }
+    .bar .btn.active { color: #7d98ff; background: rgba(77, 107, 254, .2); }
+    webview { flex: 1; border: 0; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">DeepSeek Harness · 迷你聊天</span>
+    <button class="btn" id="newChat" title="新对话">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+    </button>
+    <button class="btn" id="openMain" title="打开主窗口">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="14" height="14" rx="2"/>
+        <path d="M10 21h8a3 3 0 0 0 3-3v-8"/>
+        <path d="M10 14l8-8"/>
+      </svg>
+    </button>
+    <button class="btn" id="pin" title="置顶">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 17v5"/>
+        <path d="M8.5 3h7l.7 6.5 3 3.5H4.8l3-3.5z"/>
+      </svg>
+    </button>
+    <button class="btn" id="minimize" title="收起">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M5 12h14"/>
+      </svg>
+    </button>
+  </div>
+  <webview id="view"></webview>
+  <script src="mini.js"></script>
+</body>
+</html>
