@@ -925,6 +925,19 @@ function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+// macOS 标准"关于"面板：显示应用名、版本与项目 GitHub 地址（website 为
+// 可点击的"访问网站"链接，credits 为面板底部展示的文本）。
+function configureAboutPanel() {
+  try {
+    app.setAboutPanelOptions({
+      applicationName: APP_TITLE,
+      applicationVersion: app.getVersion(),
+      credits: '项目地址：https://github.com/qinlinglong/deepseek-harness-desktop',
+      website: 'https://github.com/qinlinglong/deepseek-harness-desktop',
+    })
+  } catch (_) {}
+}
+
 function createTray() {
   let icon
   try {
@@ -1325,12 +1338,52 @@ function sendMiniUrl() {
   if (url) miniWin.webContents.send('mini:url', url)
 }
 
+// 迷你窗置顶（豆包同款 NSPanel + 原生 level=27 + collectionBehavior）。
+// miniPinned=true 时置顶并跨 Space，false 时恢复普通窗口。
+function reapplyMiniTop() {
+  if (!miniWin || miniWin.isDestroyed()) return
+  try {
+    if (miniPinned) {
+      miniWin.setAlwaysOnTop(true, FLOAT_LEVEL)
+      if (isMac) {
+        miniWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+        if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(miniWin)
+      }
+    } else {
+      miniWin.setAlwaysOnTop(false)
+    }
+  } catch (_) {}
+}
+
+// 迷你窗定位到悬浮球附近（豆包同款）：优先悬浮球上方，空间不足回退下方；
+// 水平右对齐悬浮球，超出屏幕则贴边。
+function positionMiniNearFloat() {
+  if (!miniWin || miniWin.isDestroyed()) return
+  if (!floatWin || floatWin.isDestroyed()) return
+  try {
+    const fb = floatWin.getBounds()
+    const [mw, mh] = miniWin.getSize()
+    const wa = screen.getDisplayMatching(fb).workArea
+    const GAP = 8
+    let x = fb.x + fb.width - mw
+    let y = fb.y - mh - GAP
+    if (y < wa.y) y = fb.y + fb.height + GAP
+    if (x < wa.x) x = wa.x
+    if (x + mw > wa.x + wa.width) x = wa.x + wa.width - mw
+    if (y + mh > wa.y + wa.height) y = wa.y + wa.height - mh
+    if (y < wa.y) y = wa.y
+    miniWin.setPosition(Math.round(x), Math.round(y))
+  } catch (_) {}
+}
+
 function toggleMini() {
   if (!miniWin || miniWin.isDestroyed()) {
     createMiniWindow()
   } else if (miniWin.isVisible()) {
     miniWin.hide()
   } else {
+    reapplyMiniTop()
+    positionMiniNearFloat()
     miniWin.show()
     miniWin.focus()
     sendMiniUrl()
@@ -1383,7 +1436,7 @@ function registerIpc() {
   ipcMain.on('mini:toggle-pin', () => {
     miniPinned = !miniPinned
     if (miniWin && !miniWin.isDestroyed()) {
-      miniWin.setAlwaysOnTop(miniPinned)
+      reapplyMiniTop()
       miniWin.webContents.send('mini:pin', miniPinned)
     }
   })
@@ -1452,6 +1505,7 @@ function applyFloatState() {
 async function onReady() {
   loadConfig()
   buildAppMenu()
+  configureAboutPanel()
   createWindow()
   createTray()
   applyIcon()
@@ -1472,6 +1526,7 @@ async function onReady() {
           width: 420, height: 680, minWidth: 320, minHeight: 480,
           frame: false, show: false, alwaysOnTop: false,
           backgroundColor: '#0b0d16', title: APP_TITLE,
+          ...(isMac ? { type: 'panel' } : {}),
           webPreferences: {
             preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
             contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: true,
@@ -1498,12 +1553,13 @@ function createMiniWindow() {
   if (_warmupMiniWin && !_warmupMiniWin.isDestroyed()) {
     miniWin = _warmupMiniWin
     _warmupMiniWin = null
-    miniWin.setAlwaysOnTop(miniPinned)
+    reapplyMiniTop()
     // 关键修复：预热窗口的 mini.html 早已 did-finish-load，不能再用 once('did-finish-load')
     // 等 finish 再 sendMiniUrl，否则永远不会触发。改为立即 sendMiniUrl，并确保 mini:pin
     // 也已发送（mini.html 加载时已 send pin 一次但 miniPinned 可能在预热后被改）。
     miniWin.webContents.send('mini:pin', miniPinned)
     sendMiniUrl()
+    positionMiniNearFloat()
     miniWin.show()
     miniWin.focus()
     // resize 持久化（与下方新建路径一致）
@@ -1548,6 +1604,8 @@ function createMiniWindow() {
     alwaysOnTop: miniPinned,
     backgroundColor: '#0b0d16',
     title: APP_TITLE,
+    // macOS 用 NSPanel（豆包 chat_window 同款），全屏 Space 下置顶且不抢主应用焦点
+    ...(isMac ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
       contextIsolation: true,
@@ -1557,7 +1615,11 @@ function createMiniWindow() {
     },
   })
   miniWin.loadFile(path.join(__dirname, 'renderer', 'mini.html'))
-  miniWin.once('ready-to-show', () => miniWin.show())
+  miniWin.once('ready-to-show', () => {
+    reapplyMiniTop()
+    positionMiniNearFloat()
+    miniWin.show()
+  })
   // 迷你窗尺寸变化时持久化（防抖 600ms）
   let saveMiniTimer = null
   const saveMiniBounds = () => {
