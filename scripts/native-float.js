@@ -37,6 +37,12 @@ let selSetLevel = null
 let selSetHidesOnDeactivate = null
 let selSetExcludedFromWindowsMenu = null
 let selSetCanHide = null
+let selSetFloatingPanel = null
+let selSetBecomesKeyOnlyIfNeeded = null
+let object_setClass = null
+let objc_getClass = null
+let nsPanelClass = null
+let panelAppliedWindows = new WeakSet()
 
 function init() {
   if (initialized) return true
@@ -45,7 +51,6 @@ function init() {
     if (!koffi) koffi = require('koffi')
     const libA = koffi.load('/usr/lib/libobjc.A.dylib')
     msg0 = libA.func('void * objc_msgSend(void *self, void *op)')
-    const getClass = libA.func('void * objc_getClass(const char *name)')
     const selReg = libA.func('void * sel_registerName(const char *name)')
 
     const libB = koffi.load('/usr/lib/libobjc.A.dylib')
@@ -53,16 +58,24 @@ function init() {
     const libC = koffi.load('/usr/lib/libobjc.A.dylib')
     msg1u = libC.func('uint64_t objc_msgSend(void *self, void *op, uint64_t v)')
 
+    // object_setClass: 把 NSWindow 实例动态升级为 NSPanel（运行时改 isa 指针）。
+    // 这是 Raycast/Alfred/豆包等成熟悬浮球工具的真正做法：NSPanel 是
+    // NSWindow 子类，没有额外 ivar，向上升级安全。NSPanel 在 macOS 全屏
+    // Space 的显示行为与 NSWindow 本质不同——辅助面板可进入所有应用的全
+    // 屏 Space 并显示，而 NSWindow 即使设了 hidesOnDeactivate:NO +
+    // collectionBehavior 仍可能被剔除。
+    object_setClass = libA.func('void * object_setClass(void *obj, void *cls)')
+    objc_getClass = libA.func('void * objc_getClass(const char *name)')
+    nsPanelClass = objc_getClass('NSPanel')
+
     selWindow = selReg('window')
     selSetCollectionBehavior = selReg('setCollectionBehavior:')
     selSetLevel = selReg('setLevel:')
-    // 关键补充（仿豆包辅助面板行为）：
-    // - setHidesOnDeactivate:NO  切换到其他应用时不隐藏悬浮球
-    // - setCanHide:NO             Cmd+H 隐藏应用时悬浮球不跟随隐藏
-    // - setExcludedFromWindowsMenu:YES  不进 Window 菜单（辅助面板特性）
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
     selSetCanHide = selReg('setCanHide:')
+    selSetFloatingPanel = selReg('setFloatingPanel:')
+    selSetBecomesKeyOnlyIfNeeded = selReg('setBecomesKeyOnlyIfNeeded:')
     initialized = true
     return true
   } catch (e) {
@@ -85,11 +98,21 @@ function applyNativeFloatTop(win) {
     const nsView = handle.readBigUInt64LE()
     const nsWindow = msg0(nsView, selWindow)
     if (!nsWindow) return false
-    msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
-    msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
-    // 辅助面板行为对齐豆包：切到其他应用/Cmd+H/Window 菜单不影响悬浮球可见性
-    if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0) // NO
-    if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)                     // NO
+
+    // 一次性把 NSWindow 升级为 NSPanel（只执行一次，WeakSet 去重）
+    if (nsPanelClass && object_setClass && !panelAppliedWindows.has(win)) {
+      object_setClass(nsWindow, nsPanelClass)
+      panelAppliedWindows.add(win)
+    }
+
+    // 全屏 Space 显示行为（NSPanel + FullScreenAuxiliary = 豆包同款）
+    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
+    if (selSetLevel) msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
+    // NSPanel 辅助面板行为
+    if (selSetFloatingPanel) msg1(nsWindow, selSetFloatingPanel, 1)     // YES: 浮动面板始终置顶
+    if (selSetBecomesKeyOnlyIfNeeded) msg1(nsWindow, selSetBecomesKeyOnlyIfNeeded, 1) // YES: 仅在需要时抢焦点
+    if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0)  // NO: 切到其他应用不隐藏
+    if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)                       // NO: Cmd+H 不跟随隐藏
     if (selSetExcludedFromWindowsMenu) msg1(nsWindow, selSetExcludedFromWindowsMenu, 1) // YES
     return true
   } catch (_) {
