@@ -1085,11 +1085,15 @@ function positionFloatDefault() {
 
 // 统一重申悬浮球置顶与跨工作区（含其他应用全屏的 space）显示。
 // macOS 上全屏切换/应用切换后偶发失效，需在 show/focus/blur 时重复设置。
-function reapplyFloatTop() {
+// force 模式：先解除跨工作区再重设，强制窗口重新加入全屏 space（修复透明窗口在全屏 space 不渲染的已知问题）。
+function reapplyFloatTop(force) {
   if (!floatWin || floatWin.isDestroyed()) return
   const pinned = floatWin.isAlwaysOnTop()
   try {
     floatWin.setAlwaysOnTop(pinned, 'screen-saver')
+    if (force) {
+      floatWin.setVisibleOnAllWorkspaces(false)
+    }
     floatWin.setVisibleOnAllWorkspaces(pinned, { visibleOnFullScreen: pinned, skipTransformProcessType: pinned })
   } catch (_) {}
 }
@@ -1117,16 +1121,21 @@ function createFloatWindow() {
     },
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
-  reapplyFloatTop()
+  reapplyFloatTop(false)
   floatWin.once('ready-to-show', () => floatWin.show())
   floatWin.once('did-finish-load', () => sendFloatIcon())
   floatWin.on('show', () => {
-    reapplyFloatTop()
+    reapplyFloatTop(false)
     sendFloatIcon()
   })
   // 全屏/应用切换会触发焦点变化，趁机重申置顶，确保悬浮球始终可见
-  floatWin.on('focus', () => reapplyFloatTop())
-  floatWin.on('blur', () => setTimeout(reapplyFloatTop, 120).unref())
+  floatWin.on('focus', () => reapplyFloatTop(false))
+  // blur 时用 force 模式 toggle 跨工作区，强制重新加入全屏 space（限频 400ms）
+  floatWin.on('blur', () => {
+    clearTimeout(reapplyFloatTop._timer)
+    reapplyFloatTop._timer = setTimeout(() => reapplyFloatTop(true), 150)
+    reapplyFloatTop._timer.unref && reapplyFloatTop._timer.unref()
+  })
 
   if (Array.isArray(config.bubblePos) && config.bubblePos.length === 2) {
     floatWin.setPosition(config.bubblePos[0], config.bubblePos[1])
@@ -1349,7 +1358,9 @@ app.on('window-all-closed', () => {
 
 // 切到其他应用（含其全屏 space）时重申悬浮球置顶，确保不被遮挡
 app.on('browser-window-blur', () => {
-  setTimeout(reapplyFloatTop, 150).unref()
+  clearTimeout(reapplyFloatTop._timer)
+  reapplyFloatTop._timer = setTimeout(() => reapplyFloatTop(true), 150)
+  reapplyFloatTop._timer.unref && reapplyFloatTop._timer.unref()
 })
 
 app.on('activate', () => restoreWindow())
