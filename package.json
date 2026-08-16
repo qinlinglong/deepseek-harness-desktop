@@ -69,6 +69,7 @@
       "preload.js",
       "renderer/**",
       "assets/**",
+      "scripts/native-float.js",
       "node_modules/**"
     ],
     "directories": {

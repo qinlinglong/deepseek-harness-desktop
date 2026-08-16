@@ -19,6 +19,12 @@ const path = require('node:path')
 const fs = require('node:fs')
 const httpProxy = require('http-proxy')
 const yaml = require('js-yaml')
+// 原生 macOS 悬浮球置顶（koffi + AppKit，豆包同款）。非 macOS 或 koffi
+// 缺失时 nativeFloatTop 为 null，reapplyFloatTop 自动回退 Electron API。
+let nativeFloatTop = null
+try {
+  nativeFloatTop = require('./scripts/native-float.js')
+} catch (_) {}
 
 const isMac = process.platform === 'darwin'
 const APP_TITLE = 'DeepSeek Harness'
@@ -1096,10 +1102,14 @@ function positionFloatDefault() {
 // 统一重申悬浮球置顶与跨工作区显示。
 // 普通全屏/最大化场景不涉及多 Space，只需确保 alwaysOnTop 生效；
 // moveTop 用于窗口被其他应用覆盖时强制回到最前（透明窗口偶发不重绘）。
+// macOS 上优先用原生 AppKit 设置（豆包同款），Electron 高层 API 兜底。
 function reapplyFloatTop() {
   if (!floatWin || floatWin.isDestroyed()) return
   if (!floatWin.isAlwaysOnTop()) return
   try {
+    if (nativeFloatTop) {
+      if (nativeFloatTop.applyNativeFloatTop(floatWin)) return
+    }
     floatWin.setAlwaysOnTop(true, 'screen-saver')
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   } catch (_) {}
