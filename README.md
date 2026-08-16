@@ -2,18 +2,7 @@
 
 > 开源地址：<https://github.com/qinlinglong/deepseek-harness-desktop>
 
-基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的跨平台桌面应用（Electron）。**免命令行安装**：打包时已将 Node.js 运行时、`@deepseek-ai/dsh` 及其全部依赖内置，用户安装后双击即用，无需安装 Node.js、无需执行任何命令。
-
-## 下载与安装
-
-- 从 [GitHub Releases](https://github.com/qinlinglong/deepseek-harness-desktop/releases) 下载对应平台产物：
-  - **macOS**：`DeepSeek-Harness-<版本>-arm64.dmg`（或 `-mac.zip`）
-  - **Windows**：`DeepSeek-Harness-Setup-<版本>.exe`（安装版）或 `DeepSeek-Harness-<版本>-portable.exe`（免安装版）
-  - **Linux**：`DeepSeek-Harness-<版本>.AppImage` 或 `dsh-desktop_<版本>_amd64.deb`
-- **macOS 首次打开提示「已损坏，无法打开」/「无法验证开发者」**：应用暂未进行 Apple 签名与公证，非 App Store 下载的未签名应用会被 Gatekeeper 拦截。任选其一放行：
-  - 右键应用 → 打开 → 在二次确认弹窗中点击「打开」；
-  - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
-  - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
+基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的跨平台桌面应用（Electron），**免命令行安装**。打包时已将 Node.js 运行时、`@deepseek-ai/dsh` 及全部依赖内置，双击即用，无需安装 Node.js、无需执行任何命令。
 
 ## 功能亮点
 
@@ -21,21 +10,29 @@
 
 > 在设置页或悬浮球右键菜单即可随时切换，保存后立即生效。
 
-- **本机模式（默认）**：开箱即用。应用内置完整的 Agent Harness 服务，无需安装 Node.js、无需执行任何命令行，双击即可开始使用。
+- **本机模式（默认）**：开箱即用，应用内置完整的 Agent Harness 服务，双击即可开始使用。
 - **局域网服务端**：把本机 Agent 能力安全地分享给整个局域网。开启后自动探测并给出「IP + 端口」访问地址，局域网内任意设备用浏览器或本客户端即可访问；端口被占用时自动顺延到空闲端口，并自动过滤不可达的网卡 IP。
 - **局域网连接**：连接 `127.0.0.1` 本机服务，或局域网内其他设备开启的局域网服务端，填入 IP + 端口 + 协议（HTTP/HTTPS）即可。
 
-开启局域网服务端后，设置页会展示可访问的局域网地址：
+#### 开启局域网服务端
+
+设置页选择「局域网服务端」，开启后展示可访问的局域网地址：
 
 ![开启局域网访问](assets/dsh-pic-开启局域网访问.jpg)
 
-局域网内设备通过浏览器打开访问地址，输入访问密码即可使用：
+局域网内任意设备用浏览器打开上方地址，输入访问密码即可使用：
 
 ![开启局域网访问-打开网站](assets/dsh-pic-开启局域网访问-打开网站.jpg)
 
+#### 局域网连接
+
+选择「局域网连接」模式会自动跳转到填写页面，填入对方设备的 IP 和端口即可连上远程服务：
+
+![远程链接](assets/dsh-pic-远程链接.jpg)
+
 ### 桌面悬浮球
 
-> 常驻桌面角落的圆形图标，始终置顶，是最高效的入口。
+> 常驻桌面角落的白色圆形图标，始终置顶，是最高效的入口。
 
 - **点击**：弹出迷你聊天窗口，随时对话
 - **按住拖动**：任意摆放位置（防误触设计，按住约 0.2 秒后进入拖动）
@@ -55,9 +52,20 @@
 
 > 设置中可在「DeepSeek 官方 / D娘」间切换，托盘、窗口、Dock 与悬浮球图标即时生效。
 
----
+## 下载与安装
 
-其他细节：自动选择随机空闲端口，端口冲突时自动重试；单实例运行；主窗口点击关闭即关闭窗口（应用驻留悬浮球与托盘，随时可再打开）；退出方式：悬浮球右键、设置页「退出应用」、托盘菜单「退出」。
+从 [GitHub Releases](https://github.com/qinlinglong/deepseek-harness-desktop/releases) 下载对应平台产物：
+
+| 平台 | 安装包 |
+|------|--------|
+| macOS | `DeepSeek-Harness-<版本>-arm64.dmg`（或 `-mac.zip`） |
+| Windows | `DeepSeek-Harness-Setup-<版本>.exe`（安装版）或 `DeepSeek-Harness-<版本>-portable.exe`（免安装版） |
+| Linux | `DeepSeek-Harness-<版本>.AppImage` 或 `dsh-desktop_<版本>_amd64.deb` |
+
+> **macOS 首次打开提示「已损坏，无法打开」/「无法验证开发者」**：应用暂未进行 Apple 签名与公证，非 App Store 下载的未签名应用会被 Gatekeeper 拦截。任选其一放行：
+> - 右键应用 → 打开 → 在二次确认弹窗中点击「打开」；
+> - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
+> - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
 
 ## 安全模型
 
@@ -67,6 +75,15 @@
 2. **dsh 浏览器信任围栏**：dsh 本身绑定 `127.0.0.1`（随机端口），并通过 `--trusted-host <局域网IP>` 只信任当前机器的局域网 IP。因此即便知道密码，DNS 重绑定、跨站请求、以及通过其它 IP 的访问都会被 dsh 的 `/api` 围栏拒绝（403）。
 
 > ⚠ 局域网模式下，任何知道密码的设备都能操作本机 Agent 并执行命令。请设置高强度密码，仅在可信网络使用。
+
+## 数据与配置
+
+- 用户数据：`~/.dsh`（dsh 的 harness home，含 profiles / 会话 / 凭据）
+- 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希）
+- 配置目录：
+  - macOS: `~/Library/Application Support/dsh-desktop/`
+  - Windows: `%APPDATA%/dsh-desktop/`
+  - Linux: `~/.config/dsh-desktop/`
 
 ## 开发
 
@@ -94,14 +111,13 @@ npm start            # 开发模式启动
 - 应用内已内置 Node 运行时（Electron 的 `ELECTRON_RUN_AS_NODE`），原生模块（node-pty、sharp、koffi 等）均为 N-API prebuild，跨平台可用（前提是按上面要求在各平台安装）。
 - 如需签名/公证，在 electron-builder 配置中补充证书环境变量即可；未签名构建可直接内部分发使用。
 
-## 数据与配置
+### 自动发布
 
-- 用户数据：`~/.dsh`（dsh 的 harness home，含 profiles / 会话 / 凭据）
-- 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希）
-- 配置目录：
-  - macOS: `~/Library/Application Support/dsh-desktop/`
-  - Windows: `%APPDATA%/dsh-desktop/`
-  - Linux: `~/.config/dsh-desktop/`
+打 `v*` tag 推送到 GitHub 即触发三平台 CI 构建，并自动创建 GitHub Release（草稿）上传三平台安装包；在 Release 页面确认后发布即可公开下载。
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 ## 目录结构
 
@@ -112,6 +128,7 @@ renderer/index.html   启动页 + 连接设置界面
 renderer/floating.*   桌面悬浮球
 renderer/mini.*       迷你聊天窗口（webview + 顶部按钮栏）
 assets/icons/         应用图标（DeepSeek 官方 / D娘）
+assets/               界面截图（README 配图）
 build/                打包用图标
 scripts/gen-icon.mjs  图标生成脚本
 scripts/verify-native.mjs  校验打包产物原生模块齐全（CI 使用）
