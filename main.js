@@ -28,6 +28,10 @@ try {
 
 const isMac = process.platform === 'darwin'
 const APP_TITLE = 'DeepSeek Harness'
+// 悬浮球窗口层级名：用 'status'（NSStatusWindowLevel=25），既高于普通窗口
+// 又能被 macOS 全屏 Space 接受为辅助窗口显示。'screen-saver'(1000) 太高
+// 会被全屏 Space 剔除，导致浏览器/IDEA 全屏下悬浮球不可见。
+const FLOAT_LEVEL = 'status'
 const dshVersion = require('@deepseek-ai/dsh/package.json').version
 const PASSWORD_SALT = 'dsh-desktop:'
 
@@ -1050,7 +1054,7 @@ function showFloatMenu() {
       checked: floatWin.isAlwaysOnTop(),
       click: (item) => {
         if (floatWin && !floatWin.isDestroyed()) {
-          floatWin.setAlwaysOnTop(!!item.checked, 'screen-saver')
+          floatWin.setAlwaysOnTop(!!item.checked, FLOAT_LEVEL)
           floatWin.setVisibleOnAllWorkspaces(!!item.checked, { visibleOnFullScreen: !!item.checked, skipTransformProcessType: !!item.checked })
         }
       },
@@ -1110,7 +1114,7 @@ function reapplyFloatTop() {
     if (nativeFloatTop) {
       if (nativeFloatTop.applyNativeFloatTop(floatWin)) return
     }
-    floatWin.setAlwaysOnTop(true, 'screen-saver')
+    floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   } catch (_) {}
 }
@@ -1162,7 +1166,7 @@ function floatToFront(forceRefresh) {
         if (!floatWin || floatWin.isDestroyed()) return
         try {
           floatWin.setPosition(pos[0], pos[1])
-          floatWin.setAlwaysOnTop(true, 'screen-saver')
+          floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
           floatWin.showInactive()
           floatWin.moveTop()
         } catch (_) {}
@@ -1316,14 +1320,21 @@ function registerIpc() {
     const pt = screen.getCursorScreenPoint()
     const [wx, wy] = floatWin.getPosition()
     floatGrab = { ox: pt.x - wx, oy: pt.y - wy }
+    // 拖动开始即刷新防抖：拖动期间 + 拖动后 600ms 内禁止 forceRefresh
+    // 的 hide+show 重绘，否则 pointerup 后悬浮球 blur 触发重绘会让窗口闪一下
+    lastFloatRefresh = Date.now()
   })
   ipcMain.on('float:drag-move', () => {
     if (!floatWin || floatWin.isDestroyed() || !floatGrab) return
     const pt = screen.getCursorScreenPoint()
     floatWin.setPosition(Math.round(pt.x - floatGrab.ox), Math.round(pt.y - floatGrab.oy))
+    // 拖动过程中持续刷新防抖，避免 1.5s 轮询的 reapply 与高频 setPosition 叠加造成闪烁
+    lastFloatRefresh = Date.now()
   })
   ipcMain.on('float:drag-end', () => {
     floatGrab = null
+    // 拖动结束刷新防抖：阻断 pointerup 后 blur 触发的 forceRefresh 重绘
+    lastFloatRefresh = Date.now()
   })
   ipcMain.on('float:toggle-mini', () => toggleMini())
   ipcMain.on('float:menu', () => showFloatMenu())
