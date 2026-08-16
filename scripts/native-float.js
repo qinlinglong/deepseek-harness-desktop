@@ -34,6 +34,9 @@ let msg1u = null // objc_msgSend(void*, void*, uint64_t) -> uint64_t
 let selWindow = null
 let selSetCollectionBehavior = null
 let selSetLevel = null
+let selSetHidesOnDeactivate = null
+let selSetExcludedFromWindowsMenu = null
+let selSetCanHide = null
 
 function init() {
   if (initialized) return true
@@ -53,6 +56,13 @@ function init() {
     selWindow = selReg('window')
     selSetCollectionBehavior = selReg('setCollectionBehavior:')
     selSetLevel = selReg('setLevel:')
+    // 关键补充（仿豆包辅助面板行为）：
+    // - setHidesOnDeactivate:NO  切换到其他应用时不隐藏悬浮球
+    // - setCanHide:NO             Cmd+H 隐藏应用时悬浮球不跟随隐藏
+    // - setExcludedFromWindowsMenu:YES  不进 Window 菜单（辅助面板特性）
+    selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
+    selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
+    selSetCanHide = selReg('setCanHide:')
     initialized = true
     return true
   } catch (e) {
@@ -77,6 +87,10 @@ function applyNativeFloatTop(win) {
     if (!nsWindow) return false
     msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
     msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
+    // 辅助面板行为对齐豆包：切到其他应用/Cmd+H/Window 菜单不影响悬浮球可见性
+    if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0) // NO
+    if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)                     // NO
+    if (selSetExcludedFromWindowsMenu) msg1(nsWindow, selSetExcludedFromWindowsMenu, 1) // YES
     return true
   } catch (_) {
     return false

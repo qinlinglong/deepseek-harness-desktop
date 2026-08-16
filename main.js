@@ -1254,6 +1254,12 @@ function createFloatWindow() {
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
   floatWin._floatOnTop = true
+  // 关键：悬浮球设为不可聚焦（仿豆包辅助面板）。macOS 全屏 Space 的
+  // FullScreenAuxiliary 集合行为对"不抢键盘焦点的辅助窗口"更友好——
+  // 抢焦点的普通 window 在进入全屏 Space 时会被系统隐藏，而
+  // non-activating/focusable:false 的窗口作为"辅助面板"可进入并显示。
+  // 这也是豆包悬浮球点击不抢焦点的原因。
+  floatWin.setFocusable(false)
   reapplyFloatTop()
   startFloatTopWatch()
   floatWin.once('ready-to-show', () => floatWin.show())
