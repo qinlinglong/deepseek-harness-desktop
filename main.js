@@ -794,10 +794,21 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
   // 主界面（harness UI）注入「设置」入口，与悬浮球右键菜单对齐，打开同一设置面板
-  mainWindow.webContents.on('did-finish-load', () => {
+  const maybeInjectSettings = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     const url = mainWindow.webContents.getURL()
     if (!url.includes('index.html')) injectSettingsButton(mainWindow.webContents)
+  }
+  mainWindow.webContents.on('dom-ready', maybeInjectSettings)
+  mainWindow.webContents.on('did-finish-load', maybeInjectSettings)
+  // 主界面（远程/本机 harness）加载失败时回退到设置页，避免白屏且保留设置入口
+  mainWindow.webContents.on('did-fail-load', (event, code, desc, url, isMainFrame) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (!isMainFrame) return
+    if (url.startsWith('file://')) return
+    if (mainWindow.webContents.getURL().includes('index.html')) return
+    log('main', `load failed (${code}) ${url} ${desc} -> fallback to settings page`)
+    try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
   })
   mainWindow.webContents.on('console-message', (e, level, message) => {
     const msg = typeof message === 'string' ? message : (e && e.message)
