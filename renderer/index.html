@@ -220,7 +220,7 @@
 
     $('settingsBtn').addEventListener('click', () => showSettings())
     $('openSettings').addEventListener('click', () => showSettings())
-    $('btnBack').addEventListener('click', showSplash)
+    $('btnBack').addEventListener('click', () => window.dshDesktop.back())
     $('btnQuit').addEventListener('click', () => window.dshDesktop.quit())
     $('retry2').addEventListener('click', () => {
       errEl.classList.remove('visible')

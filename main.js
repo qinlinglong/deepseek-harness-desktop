@@ -742,37 +742,6 @@ function restoreWindow() {
   }
 }
 
-const DSH_SETTINGS_TRIGGER = '__DSH_OPEN_SETTINGS__'
-
-function injectSettingsButton(wc) {
-  if (!wc || wc.isDestroyed()) return
-  const css = `
-    #dsh-settings-btn {
-      position: fixed; right: 14px; bottom: 96px; z-index: 2147483647;
-      width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
-      background: #1a2236cc; color: #dbe2f0; font-size: 18px; line-height: 1;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,.35); backdrop-filter: blur(6px);
-      -webkit-app-region: no-drag; transition: background .15s;
-    }
-    #dsh-settings-btn:hover { background: #24304acc; }
-  `
-  const js = `(() => {
-    if (document.getElementById('dsh-settings-btn')) return
-    const s = document.createElement('style')
-    s.id = 'dsh-settings-css'
-    s.textContent = ${JSON.stringify(css)}
-    const b = document.createElement('button')
-    b.id = 'dsh-settings-btn'
-    b.title = '打开应用设置'
-    b.textContent = '⚙'
-    b.addEventListener('click', () => console.log('${DSH_SETTINGS_TRIGGER}'))
-    document.head.appendChild(s)
-    document.body.appendChild(b)
-  })()`
-  wc.executeJavaScript(js, true).catch(() => {})
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -793,14 +762,6 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
-  // 主界面（harness UI）注入「设置」入口，与悬浮球右键菜单对齐，打开同一设置面板
-  const maybeInjectSettings = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    const url = mainWindow.webContents.getURL()
-    if (!url.includes('index.html')) injectSettingsButton(mainWindow.webContents)
-  }
-  mainWindow.webContents.on('dom-ready', maybeInjectSettings)
-  mainWindow.webContents.on('did-finish-load', maybeInjectSettings)
   // 主界面（远程/本机 harness）加载失败时回退到设置页，避免白屏且保留设置入口
   mainWindow.webContents.on('did-fail-load', (event, code, desc, url, isMainFrame) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
@@ -809,10 +770,6 @@ function createWindow() {
     if (mainWindow.webContents.getURL().includes('index.html')) return
     log('main', `load failed (${code}) ${url} ${desc} -> fallback to settings page`)
     try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
-  })
-  mainWindow.webContents.on('console-message', (e, level, message) => {
-    const msg = typeof message === 'string' ? message : (e && e.message)
-    if (msg === DSH_SETTINGS_TRIGGER) showSettings()
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1082,6 +1039,17 @@ function currentWebUrl() {
   return serverPort ? `http://127.0.0.1:${serverPort}/` : null
 }
 
+// 从设置页「取消」返回主界面（当前模式的 harness / 远程页面），避免停留在启动转圈页
+function backToMainUI() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const url = currentWebUrl()
+  if (url) {
+    loadInWindow(url)
+    return
+  }
+  try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
+}
+
 function sendFloatIcon() {
   if (!floatWin || floatWin.isDestroyed()) return
   try {
@@ -1227,6 +1195,7 @@ function toggleMini() {
 
 function registerIpc() {
   ipcMain.on('dsh:restart', () => applyConfig())
+  ipcMain.on('dsh:back', () => backToMainUI())
 
   ipcMain.on('float:drag-start', () => {
     if (!floatWin || floatWin.isDestroyed()) return

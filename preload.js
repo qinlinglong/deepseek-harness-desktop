@@ -7,6 +7,7 @@ if (window.location.protocol === 'file:') {
   onStatus: (cb) => ipcRenderer.on('dsh:status', (_e, status) => cb(status)),
   onShowSettings: (cb) => ipcRenderer.on('dsh:show-settings', (_e, mode) => cb(mode)),
   restart: () => ipcRenderer.send('dsh:restart'),
+  back: () => ipcRenderer.send('dsh:back'),
   getConfig: () => ipcRenderer.invoke('dsh:get-config'),
   saveConfig: (cfg) => ipcRenderer.invoke('dsh:save-config', cfg),
   getIcons: () => ipcRenderer.invoke('dsh:get-icons'),
