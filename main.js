@@ -1490,12 +1490,13 @@ function createMiniWindow() {
     miniWin = _warmupMiniWin
     _warmupMiniWin = null
     miniWin.setAlwaysOnTop(miniPinned)
+    // 关键修复：预热窗口的 mini.html 早已 did-finish-load，不能再用 once('did-finish-load')
+    // 等 finish 再 sendMiniUrl，否则永远不会触发。改为立即 sendMiniUrl，并确保 mini:pin
+    // 也已发送（mini.html 加载时已 send pin 一次但 miniPinned 可能在预热后被改）。
+    miniWin.webContents.send('mini:pin', miniPinned)
+    sendMiniUrl()
     miniWin.show()
     miniWin.focus()
-    miniWin.webContents.once('did-finish-load', () => {
-      miniWin.webContents.send('mini:pin', miniPinned)
-      sendMiniUrl()
-    })
     // resize 持久化（与下方新建路径一致）
     let saveMiniTimer = null
     const saveMiniBounds = () => {
