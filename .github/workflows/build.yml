@@ -44,7 +44,9 @@ jobs:
         run: npm ci
 
       - name: Build ${{ matrix.os }}
-        run: npm run ${{ matrix.script }} -- --publish always
+        # 仅打包，不在这里 publish：多 job 并发发布到同一 draft release 存在竞态，
+        # 会偶发只有部分平台资产上传成功。统一由下方 release job 发布。
+        run: npm run ${{ matrix.script }} -- --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,3 +68,38 @@ jobs:
             release/builder-debug.yml
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: ver
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.VERSION }}" --draft \
+            --title "DeepSeek Harness v${{ steps.ver.outputs.VERSION }}" \
+            || echo "release may already exist, continuing"
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \
+            -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' -o -name 'latest*.yml' \) \
+            -print0 | xargs -0 -I{} gh release upload "v${{ steps.ver.outputs.VERSION }}" "{}" --clobber
+          echo "assets uploaded for v${{ steps.ver.outputs.VERSION }}"
