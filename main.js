@@ -28,10 +28,11 @@ try {
 
 const isMac = process.platform === 'darwin'
 const APP_TITLE = 'DeepSeek Harness'
-// 悬浮球窗口层级名：用 'status'（NSStatusWindowLevel=25），既高于普通窗口
-// 又能被 macOS 全屏 Space 接受为辅助窗口显示。'screen-saver'(1000) 太高
-// 会被全屏 Space 剔除，导致浏览器/IDEA 全屏下悬浮球不可见。
-const FLOAT_LEVEL = 'status'
+// 悬浮球窗口层级：用 'pop-up-menu'（NSPopUpMenuWindowLevel=101），足够高于
+// 普通/最大化窗口(0)，且配合 FullScreenAuxiliary 能出现在全屏 Space。
+// 不用 'status'(25)：实测在 macOS 全屏 Space 下偶发被剔除，导致浏览器/IDEA
+// 全屏下悬浮球不可见。不用 'screen-saver'(1000)：太高被系统级窗口过滤。
+const FLOAT_LEVEL = 'pop-up-menu'
 const dshVersion = require('@deepseek-ai/dsh/package.json').version
 const PASSWORD_SALT = 'dsh-desktop:'
 
@@ -1051,11 +1052,23 @@ function showFloatMenu() {
     {
       label: '置顶',
       type: 'checkbox',
-      checked: floatWin.isAlwaysOnTop(),
+      checked: floatWin._floatOnTop !== false,
       click: (item) => {
         if (floatWin && !floatWin.isDestroyed()) {
-          floatWin.setAlwaysOnTop(!!item.checked, FLOAT_LEVEL)
-          floatWin.setVisibleOnAllWorkspaces(!!item.checked, { visibleOnFullScreen: !!item.checked, skipTransformProcessType: !!item.checked })
+          if (item.checked) {
+            floatWin._floatOnTop = true
+            reapplyFloatTop()
+          } else {
+            floatWin._floatOnTop = false
+            // 取消置顶：还原 Electron 默认 level 并关 visibleOnAllWorkspaces
+            if (nativeFloatTop && process.platform === 'darwin') {
+              // 原生已控制 level，取消时让 Electron 接管 setAlwaysOnTop(false)
+              floatWin.setAlwaysOnTop(false)
+            } else {
+              floatWin.setAlwaysOnTop(false)
+            }
+            floatWin.setVisibleOnAllWorkspaces(false)
+          }
         }
       },
     },
@@ -1107,15 +1120,24 @@ function positionFloatDefault() {
 // 普通全屏/最大化场景不涉及多 Space，只需确保 alwaysOnTop 生效；
 // moveTop 用于窗口被其他应用覆盖时强制回到最前（透明窗口偶发不重绘）。
 // macOS 上优先用原生 AppKit 设置（豆包同款），Electron 高层 API 兜底。
+// macOS 上优先用原生 AppKit 设置 collectionBehavior（visibleOnFullScreen 等），
+// Electron 的 setAlwaysOnTop 负责 window level。这样两者不冲突：
+// - Electron 管理 level（避免被其事件重置）
+// - native 管理 collectionBehavior（Electron API 在 macOS Sonoma+ 偶发不生效）
 function reapplyFloatTop() {
   if (!floatWin || floatWin.isDestroyed()) return
-  if (!floatWin.isAlwaysOnTop()) return
+  if (floatWin._floatOnTop === false) return
   try {
-    if (nativeFloatTop) {
-      if (nativeFloatTop.applyNativeFloatTop(floatWin)) return
-    }
+    // Electron 管理 level（用 pop-up-menu = 101，介于 status 和 screen-saver 之间，
+    // 足够高以高于所有普通/最大化窗口，且配合 FullScreenAuxiliary 能在全屏 Space 显示）
     floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    // native 补充 collectionBehavior（确保含 CanJoinAllSpaces + FullScreenAuxiliary +
+    // Stationary + IgnoresCycle = 281），Electron 的 setVisibleOnAllWorkspaces 在
+    // macOS Sonoma+ 偶发不全设这些位
+    if (nativeFloatTop) {
+      nativeFloatTop.applyNativeFloatTop(floatWin)
+    }
   } catch (_) {}
 }
 
@@ -1131,7 +1153,7 @@ function startFloatTopWatch() {
   stopFloatTopWatch()
   floatTopWatch = setInterval(() => {
     if (!floatWin || floatWin.isDestroyed()) return
-    if (floatWin.isAlwaysOnTop()) reapplyFloatTop()
+    if (floatWin._floatOnTop !== false) reapplyFloatTop()
   }, 1500)
   if (floatTopWatch.unref) floatTopWatch.unref()
 }
@@ -1145,9 +1167,11 @@ function stopFloatTopWatch() {
 
 // 透明窗口被其他应用（尤其最大化/全屏）覆盖后，macOS 偶发不重绘导致"图标消失"。
 // forceRefresh 重绘方案：用 setOpacity(0.99→1) 触发透明窗口重绘，而非 hide+show。
-// 关键修正：showInactive() 在 macOS 上不提升 z-order，会导致悬浮球被最大化
-// 窗口(level 0)盖住——这就是"最大化下悬浮球不置顶"的根因。setOpacity 不
-// 抢焦点、不改变 z-order，配合 moveTop 维持悬浮球在最高层。
+// 关键修正1：showInactive() 在 macOS 上不提升 z-order，会导致悬浮球被最大化
+//   窗口(level 0)盖住——这就是"最大化下悬浮球不置顶"的根因之一。
+// 关键修正2：forceRefresh 不能调用 setAlwaysOnTop('status')——Electron 的
+//   setAlwaysOnTop 只支持预设 level，会把原生 setLevel(27) 重置为 status(25)，
+//   破坏豆包同款 27 级置顶。改用 applyNativeFloatTop 重新设置原生 level。
 // lastFloatRefresh 防抖：600ms 内只允许一次强制重绘，阻断循环。
 let lastFloatRefresh = 0
 
@@ -1166,7 +1190,8 @@ function floatToFront(forceRefresh) {
         if (!floatWin || floatWin.isDestroyed()) return
         try {
           floatWin.setOpacity(1)
-          floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
+          // 重新应用原生 level=27（不能调 Electron setAlwaysOnTop 否则覆盖）
+          if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(floatWin)
           floatWin.moveTop()
         } catch (_) {}
       }, 30)
@@ -1197,6 +1222,7 @@ function createFloatWindow() {
     },
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
+  floatWin._floatOnTop = true
   reapplyFloatTop()
   startFloatTopWatch()
   floatWin.once('ready-to-show', () => floatWin.show())

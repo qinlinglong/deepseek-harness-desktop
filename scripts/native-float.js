@@ -20,11 +20,12 @@ const FLOAT_COLLECTION_BEHAVIOR =
   NSWindowCollectionBehaviorFullScreenAuxiliary |
   NSWindowCollectionBehaviorStationary |
   NSWindowCollectionBehaviorIgnoresCycle
-// NSStatusWindowLevel：通知中心/HUD/工具栏用的级别(25)，足够高于普通窗口，
-// 又能被 macOS 全屏 Space 接受为"辅助窗口"显示。
-// 注意：screen-saver level(1000) 太高，会被全屏 Space 视为系统级窗口而剔除，
-// 反而导致浏览器/IDEA 全屏下悬浮球不可见。
-const SCREEN_SAVER_LEVEL = 25
+// window level：对齐豆包悬浮球实测 level=27。该值介于 NSStatusWindowLevel(25)
+// 与 NSPopUpMenuWindowLevel(101) 之间，是 macOS 上"始终置顶且不被任何
+// 全屏/最大化窗口遮挡"的经验值——NSStatusLevel(25) 在全屏 Space 下偶发
+// 被剔除，screen-saver(1000) 又过高被系统级窗口过滤。豆包用 27 经大量
+// 实测稳定可见。
+const SCREEN_SAVER_LEVEL = 27
 
 let initialized = false
 let msg0 = null // objc_msgSend(void*, void*)
@@ -82,4 +83,4 @@ function applyNativeFloatTop(win) {
   }
 }
 
-module.exports = { applyNativeFloatTop, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 25 }
+module.exports = { applyNativeFloatTop, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
