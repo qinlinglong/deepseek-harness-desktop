@@ -935,18 +935,11 @@ function lanAccessUrls() {
 }
 
 async function switchMode(mode) {
-  if (mode === 'remote' && !config.remoteHost) {
-    dialog.showMessageBox({
-      type: 'info',
-      title: '局域网连接',
-      message: '请先填写要连接的服务地址',
-      detail: '需填写服务的 IP 和端口（支持 127.0.0.1 或局域网 IP）。可在「打开设置」中填写。',
-      buttons: ['取消', '前往设置'],
-      defaultId: 1,
-      cancelId: 0,
-    }).then(({ response }) => {
-      if (response === 1) showSettings('remote')
-    })
+  if (mode === 'remote') {
+    // 局域网连接：先跳转到填写 IP/端口的设置页（复用连接设置），保存后自动连接
+    config.mode = 'remote'
+    saveConfigToDisk()
+    showSettings('remote')
     return
   }
   if (mode === 'lan') {
