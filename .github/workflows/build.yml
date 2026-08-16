@@ -44,7 +44,7 @@ jobs:
         run: npm ci
 
       - name: Build ${{ matrix.os }}
-        run: npm run ${{ matrix.script }}
+        run: npm run ${{ matrix.script }} -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

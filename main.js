@@ -975,6 +975,18 @@ function showFloatMenu() {
       ],
     },
     { type: 'separator' },
+    {
+      label: '置顶',
+      type: 'checkbox',
+      checked: floatWin.isAlwaysOnTop(),
+      click: (item) => {
+        if (floatWin && !floatWin.isDestroyed()) {
+          floatWin.setAlwaysOnTop(!!item.checked, 'screen-saver')
+          floatWin.setVisibleOnAllWorkspaces(!!item.checked, { visibleOnFullScreen: !!item.checked })
+        }
+      },
+    },
+    { type: 'separator' },
     { label: '打开设置', click: () => showSettings() },
     { type: 'separator' },
     { label: '退出应用', click: () => { isQuitting = true; app.quit() } },
@@ -1031,12 +1043,12 @@ function createFloatWindow() {
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
   floatWin.setAlwaysOnTop(true, 'screen-saver')
-  floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   floatWin.once('ready-to-show', () => floatWin.show())
   floatWin.once('did-finish-load', () => sendFloatIcon())
   floatWin.on('show', () => {
     floatWin.setAlwaysOnTop(true, 'screen-saver')
-    floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     sendFloatIcon()
   })
 
