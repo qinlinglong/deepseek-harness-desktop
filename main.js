@@ -1095,12 +1095,26 @@ function reapplyFloatTop() {
   } catch (_) {}
 }
 
-function floatToFront() {
+// 透明窗口被其他应用（尤其最大化/全屏）覆盖后，macOS 偶发不重绘导致"图标消失"。
+// forceRefresh：隐藏 60ms 后重新显示 + moveTop，强制重绘并回到最前。
+function floatToFront(forceRefresh) {
   if (!floatWin || floatWin.isDestroyed()) return
-  if (!floatWin.isVisible() || !floatWin.isAlwaysOnTop()) return
   try {
     reapplyFloatTop()
     floatWin.moveTop()
+    if (forceRefresh) {
+      const pos = floatWin.getPosition()
+      floatWin.hide()
+      setTimeout(() => {
+        if (!floatWin || floatWin.isDestroyed()) return
+        try {
+          floatWin.setPosition(pos[0], pos[1])
+          floatWin.setAlwaysOnTop(true, 'screen-saver')
+          floatWin.show()
+          floatWin.moveTop()
+        } catch (_) {}
+      }, 60)
+    }
   } catch (_) {}
 }
 
@@ -1134,12 +1148,12 @@ function createFloatWindow() {
     reapplyFloatTop()
     sendFloatIcon()
   })
-  // 应用切换/全屏后可能被覆盖或透明不重绘，趁机强制回到最前（限频 250ms）
-  floatWin.on('focus', () => floatToFront())
+  // 应用切换/全屏后可能被覆盖或透明不重绘，强制刷新回到最前（限频 500ms）
+  floatWin.on('focus', () => floatToFront(false))
   floatWin.on('blur', () => {
     clearTimeout(floatWin._toFront)
     floatWin._toFront = setTimeout(() => {
-      if (floatWin && !floatWin.isDestroyed() && floatWin.isVisible()) floatToFront()
+      if (floatWin && !floatWin.isDestroyed()) floatToFront(true)
     }, 250)
     if (floatWin._toFront.unref) floatWin._toFront.unref()
   })
@@ -1367,7 +1381,7 @@ app.on('window-all-closed', () => {
 app.on('browser-window-blur', () => {
   clearTimeout(reapplyFloatTop._timer)
   reapplyFloatTop._timer = setTimeout(() => {
-    if (floatWin && !floatWin.isDestroyed() && floatWin.isVisible()) floatToFront()
+    if (floatWin && !floatWin.isDestroyed()) floatToFront(true)
   }, 250)
   if (reapplyFloatTop._timer.unref) reapplyFloatTop._timer.unref()
 })
