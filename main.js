@@ -71,6 +71,10 @@ let config = { ...DEFAULT_CONFIG }
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // Windows：设置 AppUserModelID，保证任务栏/托盘图标与通知正常显示
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.deepseek.harness.desktop')
+  }
   app.on('second-instance', () => restoreWindow())
   app.whenReady().then(onReady)
 }
@@ -698,7 +702,10 @@ async function applyConfig() {
   }
   if (!started) {
     stopServer()
-    sendStatus({ state: 'error', message: `本地服务启动失败，已重试 ${MAX_SERVER_ATTEMPTS} 次` })
+    const winHint = process.platform === 'win32'
+      ? ' 若已安装 Git for Windows（Git Bash）仍失败，请从命令行启动应用并开启日志查看具体原因（设置环境变量 ELECTRON_ENABLE_LOGGING=1）。'
+      : ''
+    sendStatus({ state: 'error', message: `本地服务启动失败，已重试 ${MAX_SERVER_ATTEMPTS} 次。${winHint}` })
     return false
   }
   const port = started.port
