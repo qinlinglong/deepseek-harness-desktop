@@ -841,6 +841,32 @@ function openBrowserUrl() {
   }
 }
 
+function buildAppMenu() {
+  const template = [
+    {
+      label: APP_TITLE,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { label: '设置…', accelerator: 'CommandOrControl+,', click: () => showSettings() },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+    { role: 'help' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 function createTray() {
   let icon
   try {
@@ -1292,6 +1318,7 @@ function applyFloatState() {
 
 async function onReady() {
   loadConfig()
+  buildAppMenu()
   createWindow()
   createTray()
   applyIcon()
