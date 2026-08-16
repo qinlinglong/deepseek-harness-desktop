@@ -1159,16 +1159,16 @@ function reapplyFloatTop() {
   if (!floatWin || floatWin.isDestroyed()) return
   if (floatWin._floatOnTop === false) return
   try {
-    // Electron 管理 level（用 pop-up-menu = 101，介于 status 和 screen-saver 之间，
-    // 足够高以高于所有普通/最大化窗口，且配合 FullScreenAuxiliary 能在全屏 Space 显示）
+    if (nativeFloatTop) {
+      // macOS：完全由 native AppKit 控制 collectionBehavior+level，避免 Electron
+      // 的 setVisibleOnAllWorkspaces 把 native 的 cb=281 覆盖成 Electron 默认值
+      // (Electron API 在 macOS Sonoma+ 偶发设不全 CanJoinAllSpaces+FullScreenAuxiliary
+      //  位)。native 优先成功后不再调 Electron，实测与豆包 281 一致稳定。
+      if (nativeFloatTop.applyNativeFloatTop(floatWin)) return
+    }
+    // 非 darwin 或 native 失败回退：用 Electron API
     floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-    // native 补充 collectionBehavior（确保含 CanJoinAllSpaces + FullScreenAuxiliary +
-    // Stationary + IgnoresCycle = 281），Electron 的 setVisibleOnAllWorkspaces 在
-    // macOS Sonoma+ 偶发不全设这些位
-    if (nativeFloatTop) {
-      nativeFloatTop.applyNativeFloatTop(floatWin)
-    }
   } catch (_) {}
 }
 
