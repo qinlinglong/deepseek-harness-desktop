@@ -14,7 +14,7 @@ let koffi = null
 const NSWindowCollectionBehaviorCanJoinAllSpaces = 1 << 0 // 1
 const NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8 // 256
 const NSWindowCollectionBehaviorStationary = 1 << 4 // 16
-const NSWindowCollectionBehaviorIgnoresCycle = 1 << 3 // 8
+const NSWindowCollectionBehaviorIgnoresCycle = 1 << 6 // 64
 const FLOAT_COLLECTION_BEHAVIOR =
   NSWindowCollectionBehaviorCanJoinAllSpaces |
   NSWindowCollectionBehaviorFullScreenAuxiliary |

@@ -1250,6 +1250,10 @@ function createFloatWindow() {
     hasShadow: false,
     fullscreenable: false,
     alwaysOnTop: true,
+    // macOS 上用 NSPanel（非激活面板，豆包/Raycast 同款）。NSPanel + 原生
+    // setLevel(27) + FullScreenAuxiliary 才能在全屏 Space / 最大化窗口上置顶；
+    // 普通 NSWindow 即使 level 相同也会被系统在全屏 Space 下剔除。
+    ...(isMac ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'renderer', 'floating-preload.js'),
       contextIsolation: true,
