@@ -84,10 +84,15 @@ function applyNativeFloatTop(win) {
     const nsView = handle.readBigUInt64LE()
     const nsWindow = msg0(nsView, selWindow)
     if (!nsWindow) return false
-    // 仅设 NSWindow 通用属性（不与 Electron 的 collectionBehavior/level 冲突）：
-    if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0)  // NO: 切到其他应用不隐藏
-    if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)                       // NO: Cmd+H 不跟随隐藏
-    if (selSetExcludedFromWindowsMenu) msg1(nsWindow, selSetExcludedFromWindowsMenu, 1) // YES
+    // 原生设置 collectionBehavior 和 window level（豆包同款）。
+    // Electron 的 setAlwaysOnTop / setVisibleOnAllWorkspaces 在 macOS
+    // Sonoma+ 上偶发不生效，直接调 AppKit 是唯一可靠方案。
+    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
+    if (selSetLevel) msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
+    // NSWindow 通用属性
+    if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0)
+    if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)
+    if (selSetExcludedFromWindowsMenu) msg1(nsWindow, selSetExcludedFromWindowsMenu, 1)
     return true
   } catch (_) {
     return false

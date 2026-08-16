@@ -30,9 +30,8 @@ try {
 const isMac = process.platform === 'darwin'
 const APP_TITLE = 'DeepSeek Harness'
 // 悬浮球窗口层级：用 'pop-up-menu'（NSPopUpMenuWindowLevel=101），足够高于
-// 普通/最大化窗口(0)，且配合 FullScreenAuxiliary 能出现在全屏 Space。
-// 不用 'status'(25)：实测在 macOS 全屏 Space 下偶发被剔除，导致浏览器/IDEA
-// 全屏下悬浮球不可见。不用 'screen-saver'(1000)：太高被系统级窗口过滤。
+// 普通/最大化窗口(0)。macOS 上由 native-float.js 原生覆盖为 level=27（豆包实测值）。
+// 不用 'screen-saver'(1000)：太高被系统级窗口过滤。
 const FLOAT_LEVEL = 'pop-up-menu'
 const dshVersion = require('@deepseek-ai/dsh/package.json').version
 const PASSWORD_SALT = 'dsh-desktop:'
@@ -1163,25 +1162,15 @@ function positionFloatDefault() {
 }
 
 // 统一重申悬浮球置顶与跨工作区显示。
-// 普通全屏/最大化场景不涉及多 Space，只需确保 alwaysOnTop 生效；
-// moveTop 用于窗口被其他应用覆盖时强制回到最前（透明窗口偶发不重绘）。
-// macOS 上优先用原生 AppKit 设置（豆包同款），Electron 高层 API 兜底。
-// macOS 上优先用原生 AppKit 设置 collectionBehavior（visibleOnFullScreen 等），
-// Electron 的 setAlwaysOnTop 负责 window level。这样两者不冲突：
-// - Electron 管理 level（避免被其事件重置）
-// - native 管理 collectionBehavior（Electron API 在 macOS Sonoma+ 偶发不生效）
+// Electron 的 setAlwaysOnTop + setVisibleOnAllWorkspaces 作为跨平台基线；
+// macOS 上由 nativeFloatTop.applyNativeFloatTop() 原生覆盖 level=27 和
+// collectionBehavior（豆包同款），覆盖 Electron API 在 macOS Sonoma+ 的不可靠行为。
 function reapplyFloatTop() {
   if (!floatWin || floatWin.isDestroyed()) return
   if (floatWin._floatOnTop === false) return
   try {
-    // 用 Electron API 设 collectionBehavior（含 skipTransformProcessType 让窗口
-    // 不束缚于 App 名下 Space）+ visibleOnFullScreen（进全屏 Space）。
-    // screen-saver 级别最高，skipTransformProcessType: true 让窗口成为
-    // "进程辅助"窗口可进全屏 Space（社区验证有效的组合）。
-    floatWin.setAlwaysOnTop(true, 'screen-saver')
+    floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-    // native 只补充 hidesOnDeactivate:NO 等 NSWindow 通用属性（不与 Electron
-    // collectionBehavior/level 冲突）
     if (nativeFloatTop) {
       nativeFloatTop.applyNativeFloatTop(floatWin)
     }
