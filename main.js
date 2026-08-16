@@ -1035,7 +1035,7 @@ function showFloatMenu() {
       click: (item) => {
         if (floatWin && !floatWin.isDestroyed()) {
           floatWin.setAlwaysOnTop(!!item.checked, 'screen-saver')
-          floatWin.setVisibleOnAllWorkspaces(!!item.checked, { visibleOnFullScreen: !!item.checked })
+          floatWin.setVisibleOnAllWorkspaces(!!item.checked, { visibleOnFullScreen: !!item.checked, skipTransformProcessType: !!item.checked })
         }
       },
     },
@@ -1083,6 +1083,17 @@ function positionFloatDefault() {
   floatWin.setPosition(display.x + display.width - w - 24, display.y + display.height - h - 24)
 }
 
+// 统一重申悬浮球置顶与跨工作区（含其他应用全屏的 space）显示。
+// macOS 上全屏切换/应用切换后偶发失效，需在 show/focus/blur 时重复设置。
+function reapplyFloatTop() {
+  if (!floatWin || floatWin.isDestroyed()) return
+  const pinned = floatWin.isAlwaysOnTop()
+  try {
+    floatWin.setAlwaysOnTop(pinned, 'screen-saver')
+    floatWin.setVisibleOnAllWorkspaces(pinned, { visibleOnFullScreen: pinned, skipTransformProcessType: pinned })
+  } catch (_) {}
+}
+
 function createFloatWindow() {
   if (floatWin && !floatWin.isDestroyed()) {
     floatWin.show()
@@ -1106,15 +1117,16 @@ function createFloatWindow() {
     },
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
-  floatWin.setAlwaysOnTop(true, 'screen-saver')
-  floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  reapplyFloatTop()
   floatWin.once('ready-to-show', () => floatWin.show())
   floatWin.once('did-finish-load', () => sendFloatIcon())
   floatWin.on('show', () => {
-    floatWin.setAlwaysOnTop(true, 'screen-saver')
-    floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    reapplyFloatTop()
     sendFloatIcon()
   })
+  // 全屏/应用切换会触发焦点变化，趁机重申置顶，确保悬浮球始终可见
+  floatWin.on('focus', () => reapplyFloatTop())
+  floatWin.on('blur', () => setTimeout(reapplyFloatTop, 120).unref())
 
   if (Array.isArray(config.bubblePos) && config.bubblePos.length === 2) {
     floatWin.setPosition(config.bubblePos[0], config.bubblePos[1])
@@ -1333,6 +1345,11 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   if (!isQuitting) return
   app.quit()
+})
+
+// 切到其他应用（含其全屏 space）时重申悬浮球置顶，确保不被遮挡
+app.on('browser-window-blur', () => {
+  setTimeout(reapplyFloatTop, 150).unref()
 })
 
 app.on('activate', () => restoreWindow())

@@ -74,6 +74,12 @@
 > - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
 > - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
 
+## 平台注意事项
+
+- **Windows**：安装包未签名，首次运行可能提示「Windows 已保护你的电脑」，选择「更多信息 → 仍要运行」即可。
+- **Linux**：AppImage 需系统安装 FUSE（Debian/Ubuntu：`sudo apt install libfuse2`）；透明悬浮球在 Wayland 合成器下可能显示异常，建议在 X11 会话下使用。
+- **托盘图标**：依赖系统托盘实现（Windows 任务栏 / Linux AppIndicator，GNOME 需安装 AppIndicator 扩展）。
+
 ## 安全模型
 
 局域网访问由两层防护：
