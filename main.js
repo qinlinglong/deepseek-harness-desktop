@@ -244,8 +244,11 @@ function sendStatus(status) {
   }
 }
 
+let harnessLoadTries = 0
+
 function loadInWindow(url) {
   if (!mainWindow || mainWindow.isDestroyed()) return
+  harnessLoadTries = 0
   try {
     currentOrigin = new URL(url).origin
   } catch (_) {}
@@ -762,13 +765,26 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
-  // 主界面（远程/本机 harness）加载失败时回退到设置页，避免白屏且保留设置入口
+  // 主界面（远程/本机 harness）加载失败：服务已就绪时先重试（启动初期可能尚未监听），
+  // 最终失败再回退设置页并显示错误，避免白屏或停留在"正在启动"转圈
   mainWindow.webContents.on('did-fail-load', (event, code, desc, url, isMainFrame) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     if (!isMainFrame) return
     if (url.startsWith('file://')) return
     if (mainWindow.webContents.getURL().includes('index.html')) return
+    const target = currentWebUrl()
+    if (target && target === url && harnessLoadTries < 3) {
+      harnessLoadTries++
+      log('main', `harness load failed (${code}), retry ${harnessLoadTries}/3: ${url}`)
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && currentWebUrl() === target) {
+          try { mainWindow.webContents.loadURL(target) } catch (_) {}
+        }
+      }, 800)
+      return
+    }
     log('main', `load failed (${code}) ${url} ${desc} -> fallback to settings page`)
+    sendStatus({ state: 'error', message: '主界面加载失败，请检查服务后重试', mode: config.mode })
     try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
   })
 
@@ -1072,8 +1088,8 @@ function createFloatWindow() {
     return
   }
   floatWin = new BrowserWindow({
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     frame: false,
     transparent: true,
     resizable: false,

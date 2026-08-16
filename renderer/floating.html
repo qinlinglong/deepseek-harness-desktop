@@ -10,14 +10,14 @@
     body { display: flex; align-items: center; justify-content: center; }
     #bubble {
       position: relative;
-      width: 52px; height: 52px; border-radius: 50%; cursor: grab;
+      width: 44px; height: 44px; border-radius: 50%; cursor: grab;
       background: radial-gradient(circle at 30% 28%, #ffffff, #e4e9f4 72%);
       border: 2px solid rgba(110, 132, 210, .65);
       user-select: none;
     }
     #bubble::before {
       content: '';
-      position: absolute; inset: 7px;
+      position: absolute; inset: 5px;
       border-radius: 50%;
       background-size: contain; background-position: center; background-repeat: no-repeat;
       background-image: var(--bubble-icon, none);
