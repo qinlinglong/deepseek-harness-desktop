@@ -84,10 +84,7 @@ function applyNativeFloatTop(win) {
     const nsView = handle.readBigUInt64LE()
     const nsWindow = msg0(nsView, selWindow)
     if (!nsWindow) return false
-    // 全屏 Space 显示行为（CanJoinAllSpaces|FullScreenAuxiliary|Stationary|IgnoresCycle）
-    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
-    if (selSetLevel) msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
-    // 辅助窗口行为对齐豆包：
+    // 仅设 NSWindow 通用属性（不与 Electron 的 collectionBehavior/level 冲突）：
     if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0)  // NO: 切到其他应用不隐藏
     if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)                       // NO: Cmd+H 不跟随隐藏
     if (selSetExcludedFromWindowsMenu) msg1(nsWindow, selSetExcludedFromWindowsMenu, 1) // YES

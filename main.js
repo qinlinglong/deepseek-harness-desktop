@@ -37,6 +37,20 @@ const FLOAT_LEVEL = 'pop-up-menu'
 const dshVersion = require('@deepseek-ai/dsh/package.json').version
 const PASSWORD_SALT = 'dsh-desktop:'
 
+// 登录页头像：DeepSeek 官方图标转 data URL 内嵌，避免登录页依赖外部资源
+let loginLogoDataUrl = ''
+function getLoginLogoDataUrl() {
+  if (loginLogoDataUrl) return loginLogoDataUrl
+  try {
+    const p = path.join(__dirname, 'assets', 'icons', 'deepseek.png')
+    if (fs.existsSync(p)) {
+      const buf = fs.readFileSync(p)
+      loginLogoDataUrl = 'data:image/png;base64,' + buf.toString('base64')
+    }
+  } catch (_) {}
+  return loginLogoDataUrl || ''
+}
+
 const DEFAULT_CONFIG = {
   mode: 'local', // 'local' | 'lan' | 'remote'
   lanPort: 3080,
@@ -468,7 +482,8 @@ function loginPage(err) {
   .card { width:340px; text-align:center; }
   .logo { width:56px; height:56px; margin:0 auto 18px; border-radius:14px;
     background:linear-gradient(135deg,#7d98ff,#4d6bfe); display:flex; align-items:center; justify-content:center;
-    color:#fff; font-weight:700; font-size:22px; }
+    overflow:hidden; }
+  .logo img { width:100%; height:100%; object-fit:contain; }
   h1 { font-size:17px; font-weight:600; }
   .sub { font-size:12px; color:#8a93b5; margin:6px 0 22px; }
   input { width:100%; padding:11px 12px; border-radius:8px; border:1px solid #2a3050;
@@ -483,7 +498,7 @@ function loginPage(err) {
 </head>
 <body>
   <div class="card">
-    <div class="logo">D</div>
+    <div class="logo"><img src="${getLoginLogoDataUrl()}" alt="DeepSeek"/></div>
     <h1>DeepSeek Harness</h1>
     <div class="sub">此服务需要密码访问</div>
     <form method="post" action="/_auth/login">
@@ -1159,16 +1174,17 @@ function reapplyFloatTop() {
   if (!floatWin || floatWin.isDestroyed()) return
   if (floatWin._floatOnTop === false) return
   try {
-    if (nativeFloatTop) {
-      // macOS：完全由 native AppKit 控制 collectionBehavior+level，避免 Electron
-      // 的 setVisibleOnAllWorkspaces 把 native 的 cb=281 覆盖成 Electron 默认值
-      // (Electron API 在 macOS Sonoma+ 偶发设不全 CanJoinAllSpaces+FullScreenAuxiliary
-      //  位)。native 优先成功后不再调 Electron，实测与豆包 281 一致稳定。
-      if (nativeFloatTop.applyNativeFloatTop(floatWin)) return
-    }
-    // 非 darwin 或 native 失败回退：用 Electron API
-    floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
+    // 用 Electron API 设 collectionBehavior（含 skipTransformProcessType 让窗口
+    // 不束缚于 App 名下 Space）+ visibleOnFullScreen（进全屏 Space）。
+    // screen-saver 级别最高，skipTransformProcessType: true 让窗口成为
+    // "进程辅助"窗口可进全屏 Space（社区验证有效的组合）。
+    floatWin.setAlwaysOnTop(true, 'screen-saver')
     floatWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    // native 只补充 hidesOnDeactivate:NO 等 NSWindow 通用属性（不与 Electron
+    // collectionBehavior/level 冲突）
+    if (nativeFloatTop) {
+      nativeFloatTop.applyNativeFloatTop(floatWin)
+    }
   } catch (_) {}
 }
 
