@@ -313,6 +313,8 @@ function spawnServer(port) {
     if (!isQuitting && serverProc === child) {
       serverProc = null
       serverPort = null
+      // 服务已死：局域网代理指向的端口随即失效，停止代理避免返回 Bad Gateway
+      stopAuthProxy()
       sendStatus({ state: 'error', message: `服务意外退出 (code=${code})` })
       // 主窗口若停留在已死的服务页，回退到启动页展示错误，避免"死页面"
       if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.getURL().includes('index.html')) {
@@ -542,8 +544,14 @@ function startAuthProxy(lanPort, targetPort) {
     log('main', `proxy web error: ${err.message}`)
     try {
       if (res && !res.headersSent) {
-        res.writeHead(502)
-        res.end('Bad Gateway')
+        res.writeHead(502, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(
+          '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>服务暂不可用</title></head>' +
+          '<body style="font-family:system-ui;background:#0b0d16;color:#dbe2f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
+          '<div style="text-align:center"><h1 style="font-size:26px;margin:0 0 10px">服务暂不可用</h1>' +
+          '<p style="margin:0;color:#8a93a8">Agent 服务当前未运行或正在重启，请稍后刷新页面。</p>' +
+          '<p style="margin:10px 0 0;font-size:13px;color:#5d6577">若长时间无法访问，请在桌面应用设置中重新开启局域网服务。</p></div></body></html>'
+        )
       }
     } catch (_) {}
   })
