@@ -4,6 +4,17 @@
 
 基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的跨平台桌面应用（Electron）。**免命令行安装**：打包时已将 Node.js 运行时、`@deepseek-ai/dsh` 及其全部依赖内置，用户安装后双击即用，无需安装 Node.js、无需执行任何命令。
 
+## 下载与安装
+
+- 从 [GitHub Releases](https://github.com/qinlinglong/deepseek-harness-desktop/releases) 下载对应平台产物：
+  - **macOS**：`DeepSeek-Harness-<版本>-arm64.dmg`（或 `-mac.zip`）
+  - **Windows**：`DeepSeek-Harness-Setup-<版本>.exe`（安装版）或 `DeepSeek-Harness-<版本>-portable.exe`（免安装版）
+  - **Linux**：`DeepSeek-Harness-<版本>.AppImage` 或 `dsh-desktop_<版本>_amd64.deb`
+- **macOS 首次打开提示「已损坏，无法打开」/「无法验证开发者」**：应用暂未进行 Apple 签名与公证，非 App Store 下载的未签名应用会被 Gatekeeper 拦截。任选其一放行：
+  - 右键应用 → 打开 → 在二次确认弹窗中点击「打开」；
+  - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
+  - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
+
 ## 功能亮点
 
 ### 三种连接方式，一个桌面入口
