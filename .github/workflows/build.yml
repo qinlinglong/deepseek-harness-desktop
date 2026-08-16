@@ -91,9 +91,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 删除同名旧 release（保留 tag），避免 gh 因同名 tag 冲突创建 untagged release
+          gh release delete "v${{ steps.ver.outputs.VERSION }}" --yes 2>/dev/null || true
           gh release create "v${{ steps.ver.outputs.VERSION }}" --draft \
             --title "DeepSeek Harness v${{ steps.ver.outputs.VERSION }}" \
-            || echo "release may already exist, continuing"
+            --notes "Auto-built from tag v${{ steps.ver.outputs.VERSION }}"
 
       - name: Upload assets to release
         env:
