@@ -1105,14 +1105,47 @@ function reapplyFloatTop() {
   } catch (_) {}
 }
 
+// macOS 全屏（如浏览器全屏、IDE 全屏）会把应用放进独立 Space，悬浮球窗口
+// 若未持续声明 visibleOnFullScreen 集合行为，就不会出现在该 Space（表现为
+// "全屏下悬浮球消失"）。blur 事件在进入全屏时不一定触发，因此：
+//   1) 用节流轮询持续重应用集合行为（setter 幂等，1.5s 一次开销极小）；
+//   2) 监听 display-metrics-changed（macOS 全屏进出会隐藏菜单栏/Dock，
+//      改变显示器可用区域），触发时立即重应用并回到最前。
+let floatTopWatch = null
+
+function startFloatTopWatch() {
+  stopFloatTopWatch()
+  floatTopWatch = setInterval(() => {
+    if (!floatWin || floatWin.isDestroyed()) return
+    if (floatWin.isAlwaysOnTop()) reapplyFloatTop()
+  }, 1500)
+  if (floatTopWatch.unref) floatTopWatch.unref()
+}
+
+function stopFloatTopWatch() {
+  if (floatTopWatch) {
+    clearInterval(floatTopWatch)
+    floatTopWatch = null
+  }
+}
+
 // 透明窗口被其他应用（尤其最大化/全屏）覆盖后，macOS 偶发不重绘导致"图标消失"。
 // forceRefresh：隐藏 60ms 后重新显示 + moveTop，强制重绘并回到最前。
+// 注意：必须用 showInactive() 而非 show()——show() 会抢焦点，导致
+// "悬浮球失焦→重绘抢焦点→其他窗口失焦→再次重绘"的无限循环，
+// 表现为悬浮球持续闪烁且鼠标/输入焦点被夺走、无法操作其他窗口。
+// lastFloatRefresh 防抖：600ms 内只允许一次强制重绘，进一步阻断循环。
+let lastFloatRefresh = 0
+
 function floatToFront(forceRefresh) {
   if (!floatWin || floatWin.isDestroyed()) return
   try {
     reapplyFloatTop()
     floatWin.moveTop()
     if (forceRefresh) {
+      const now = Date.now()
+      if (now - lastFloatRefresh < 600) return
+      lastFloatRefresh = now
       const pos = floatWin.getPosition()
       floatWin.hide()
       setTimeout(() => {
@@ -1120,7 +1153,7 @@ function floatToFront(forceRefresh) {
         try {
           floatWin.setPosition(pos[0], pos[1])
           floatWin.setAlwaysOnTop(true, 'screen-saver')
-          floatWin.show()
+          floatWin.showInactive()
           floatWin.moveTop()
         } catch (_) {}
       }, 60)
@@ -1152,6 +1185,7 @@ function createFloatWindow() {
   })
   floatWin.loadFile(path.join(__dirname, 'renderer', 'floating.html'))
   reapplyFloatTop()
+  startFloatTopWatch()
   floatWin.once('ready-to-show', () => floatWin.show())
   floatWin.once('did-finish-load', () => sendFloatIcon())
   floatWin.on('show', () => {
@@ -1184,6 +1218,7 @@ function createFloatWindow() {
   })
 
   floatWin.on('closed', () => {
+    stopFloatTopWatch()
     floatWin = null
   })
 }
@@ -1373,6 +1408,7 @@ async function onReady() {
   applyIcon()
   registerIpc()
   applyFloatState()
+  registerScreenMetricsListener()
   applyConfig()
 }
 
@@ -1395,5 +1431,18 @@ app.on('browser-window-blur', () => {
   }, 250)
   if (reapplyFloatTop._timer.unref) reapplyFloatTop._timer.unref()
 })
+
+// macOS 进入/退出全屏会改变显示器可用区域（隐藏/恢复菜单栏与 Dock），
+// 触发 display-metrics-changed：立即重申悬浮球集合行为并回到最前，
+// 保证全屏 Space 下悬浮球可见（不依赖 blur 事件）。
+// 注意：screen 模块只能在 app ready 后使用，故在 onReady() 内注册。
+function registerScreenMetricsListener() {
+  screen.on('display-metrics-changed', () => {
+    if (floatWin && !floatWin.isDestroyed() && floatWin.isAlwaysOnTop()) {
+      reapplyFloatTop()
+      floatWin.moveTop()
+    }
+  })
+}
 
 app.on('activate', () => restoreWindow())
