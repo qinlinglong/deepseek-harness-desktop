@@ -418,10 +418,13 @@ const MAX_LOGIN_FAILURES = 5
 const LOGIN_LOCK_MS = 5 * 60 * 1000
 
 function isLoginLocked(req) {
-  const rec = loginFailures.get(req.socket.remoteAddress || '')
+  const ip = req.socket.remoteAddress || ''
+  const rec = loginFailures.get(ip)
   if (!rec) return false
+  // 仅锁定期内拦截；锁定过期才清理。计数未达阈值时保留累计，
+  // 否则会把累积中的失败计数也清掉，导致限流永远触发不了。
   if (rec.until > Date.now()) return true
-  loginFailures.delete(req.socket.remoteAddress || '')
+  if (rec.until > 0) loginFailures.delete(ip)
   return false
 }
 
