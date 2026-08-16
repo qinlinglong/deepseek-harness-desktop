@@ -9,6 +9,7 @@ const {
   clipboard,
   screen,
   dialog,
+  globalShortcut,
 } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const net = require('node:net')
@@ -46,6 +47,8 @@ const DEFAULT_CONFIG = {
   icon: 'deepseek', // 'deepseek' | 'dnee'
   showFloat: true,
   bubblePos: null,
+  mainBounds: null, // {x,y,width,height} 主窗口位置尺寸，启动时恢复（借鉴豆包 chat_window 持久化）
+  miniBounds: null,  // {width,height} 迷你窗尺寸
 }
 
 const MAX_SERVER_ATTEMPTS = 5
@@ -775,11 +778,17 @@ function restoreWindow() {
 }
 
 function createWindow() {
+  // 借鉴豆包 chat_window/image_viewer_window 持久化：保存主窗口上次位置尺寸
+  const saved = config.mainBounds && typeof config.mainBounds === 'object' ? config.mainBounds : null
+  const b = saved && Number.isFinite(saved.width) && Number.isFinite(saved.height)
+    ? saved
+    : { width: 1320, height: 860 }
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
+    width: b.width,
+    height: b.height,
     minWidth: 960,
     minHeight: 640,
+    ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) ? { x: saved.x, y: saved.y } : {}),
     title: APP_TITLE,
     show: false,
     backgroundColor: '#0b0d16',
@@ -793,6 +802,28 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  // 主窗口位置/尺寸变化时持久化（防抖 600ms）
+  let saveBoundsTimer = null
+  const saveBounds = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    clearTimeout(saveBoundsTimer)
+    saveBoundsTimer = setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      try {
+        const bounds = mainWindow.getBounds()
+        // 最小化/最大化不保存不正常尺寸
+        if (bounds.width >= 960 && bounds.height >= 640) {
+          config.mainBounds = bounds
+          saveConfigToDisk()
+        }
+      } catch (_) {}
+    }, 600)
+    if (saveBoundsTimer.unref) saveBoundsTimer.unref()
+  }
+  mainWindow.on('resize', saveBounds)
+  mainWindow.on('move', saveBounds)
+  // 持久化 EOF
 
   // 主界面（远程/本机 harness）加载失败：服务已就绪时先重试（启动初期可能尚未监听），
   // 最终失败再回退设置页并显示错误，避免白屏或停留在"正在启动"转圈
@@ -1273,49 +1304,6 @@ function toggleFloat() {
   }
 }
 
-function createMiniWindow() {
-  if (miniWin && !miniWin.isDestroyed()) {
-    miniWin.show()
-    miniWin.focus()
-    return
-  }
-  miniWin = new BrowserWindow({
-    width: 420,
-    height: 680,
-    minWidth: 320,
-    minHeight: 480,
-    frame: false,
-    show: false,
-    alwaysOnTop: miniPinned,
-    backgroundColor: '#0b0d16',
-    title: APP_TITLE,
-    webPreferences: {
-      preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webviewTag: true,
-    },
-  })
-  miniWin.loadFile(path.join(__dirname, 'renderer', 'mini.html'))
-  miniWin.once('ready-to-show', () => miniWin.show())
-  miniWin.on('closed', () => {
-    miniWin = null
-  })
-  miniWin.webContents.on('did-attach-webview', (_e, guest) => {
-    let cssKey = null
-    guest.on('dom-ready', () => {
-      // 每次导航先移除旧的注入样式，避免重复累积
-      if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
-      guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
-    })
-  })
-  miniWin.webContents.once('did-finish-load', () => {
-    miniWin.webContents.send('mini:pin', miniPinned)
-    sendMiniUrl()
-  })
-}
-
 function sendMiniUrl() {
   if (!miniWin || miniWin.isDestroyed()) return
   const url = currentWebUrl()
@@ -1455,11 +1443,181 @@ async function onReady() {
   registerIpc()
   applyFloatState()
   registerScreenMetricsListener()
-  applyConfig()
+  registerGlobalShortcuts()
+  await applyConfig()
+  // 渲染预热（借鉴豆包 warmup_render）：服务就绪后延迟 800ms 预创建迷你聊天窗
+  // (show:false)，首次点击悬浮球时直接 show()，消除约 200ms 白屏。窗口轻量、
+  // 后台 HTML 已缓存，预热开销极小。
+  setTimeout(() => {
+    try {
+      if (!miniWin && !floatWin && !isQuitting) return
+      if (!miniWin || miniWin.isDestroyed()) {
+        // 仅预热 HTML，不显示
+        const w = new BrowserWindow({
+          width: 420, height: 680, minWidth: 320, minHeight: 480,
+          frame: false, show: false, alwaysOnTop: false,
+          backgroundColor: '#0b0d16', title: APP_TITLE,
+          webPreferences: {
+            preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
+            contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: true,
+          },
+        })
+        w.loadFile(path.join(__dirname, 'renderer', 'mini.html'))
+        // 不挂接到 miniWin 变量，仅缓存预热的渲染进程；createMiniWindow 复用它
+        _warmupMiniWin = w
+        log('main', 'mini window warmup ready')
+      }
+    } catch (_) {}
+  }, 800).unref()
+}
+
+let _warmupMiniWin = null
+
+function createMiniWindow() {
+  if (miniWin && !miniWin.isDestroyed()) {
+    miniWin.show()
+    miniWin.focus()
+    return
+  }
+  // 复用预热窗口（如果存在且未销毁），消除首屏白屏
+  if (_warmupMiniWin && !_warmupMiniWin.isDestroyed()) {
+    miniWin = _warmupMiniWin
+    _warmupMiniWin = null
+    miniWin.setAlwaysOnTop(miniPinned)
+    miniWin.show()
+    miniWin.focus()
+    miniWin.webContents.once('did-finish-load', () => {
+      miniWin.webContents.send('mini:pin', miniPinned)
+      sendMiniUrl()
+    })
+    // resize 持久化（与下方新建路径一致）
+    let saveMiniTimer = null
+    const saveMiniBounds = () => {
+      if (!miniWin || miniWin.isDestroyed()) return
+      clearTimeout(saveMiniTimer)
+      saveMiniTimer = setTimeout(() => {
+        if (!miniWin || miniWin.isDestroyed()) return
+        try {
+          const s = miniWin.getSize()
+          if (s[0] >= 320 && s[1] >= 480) {
+            config.miniBounds = { width: s[0], height: s[1] }
+            saveConfigToDisk()
+          }
+        } catch (_) {}
+      }, 600)
+      if (saveMiniTimer.unref) saveMiniTimer.unref()
+    }
+    miniWin.on('resize', saveMiniBounds)
+    miniWin.webContents.on('did-attach-webview', (_e, guest) => {
+      let cssKey = null
+      guest.on('dom-ready', () => {
+        if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
+        guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
+      })
+    })
+    miniWin.on('closed', () => { miniWin = null })
+    return
+  }
+  // 借鉴豆包 chat_window 持久化：迷你窗尺寸恢复
+  const saved = config.miniBounds && Number.isFinite(config.miniBounds.width) && Number.isFinite(config.miniBounds.height)
+    ? { width: Math.max(320, config.miniBounds.width), height: Math.max(480, config.miniBounds.height) }
+    : { width: 420, height: 680 }
+  miniWin = new BrowserWindow({
+    width: saved.width,
+    height: saved.height,
+    minWidth: 320,
+    minHeight: 480,
+    frame: false,
+    show: false,
+    alwaysOnTop: miniPinned,
+    backgroundColor: '#0b0d16',
+    title: APP_TITLE,
+    webPreferences: {
+      preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: true,
+    },
+  })
+  miniWin.loadFile(path.join(__dirname, 'renderer', 'mini.html'))
+  miniWin.once('ready-to-show', () => miniWin.show())
+  // 迷你窗尺寸变化时持久化（防抖 600ms）
+  let saveMiniTimer = null
+  const saveMiniBounds = () => {
+    if (!miniWin || miniWin.isDestroyed()) return
+    clearTimeout(saveMiniTimer)
+    saveMiniTimer = setTimeout(() => {
+      if (!miniWin || miniWin.isDestroyed()) return
+      try {
+        const s = miniWin.getSize()
+        if (s[0] >= 320 && s[1] >= 480) {
+          config.miniBounds = { width: s[0], height: s[1] }
+          saveConfigToDisk()
+        }
+      } catch (_) {}
+    }, 600)
+    if (saveMiniTimer.unref) saveMiniTimer.unref()
+  }
+  miniWin.on('resize', saveMiniBounds)
+  miniWin.webContents.on('did-attach-webview', (_e, guest) => {
+    let cssKey = null
+    guest.on('dom-ready', () => {
+      // 每次导航先移除旧的注入样式，避免重复累积
+      if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
+      guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
+    })
+  })
+  miniWin.webContents.once('did-finish-load', () => {
+    miniWin.webContents.send('mini:pin', miniPinned)
+    sendMiniUrl()
+  })
+  miniWin.on('closed', () => {
+    miniWin = null
+  })
+}
+
+// 全局快捷键（借鉴豆包 shortcut.mouse_launch）：即使应用没聚焦也能呼出窗口。
+// Cmd/Ctrl+Shift+D = 打开/聚焦主窗口；Alt+D = 切换迷你聊天窗；Alt+S = 切换悬浮球。
+// 桌面端登录系统后注册，退出时 Electron 自动注销，无需显式管理。
+let globalShortcutsRegistered = false
+function registerGlobalShortcuts() {
+  if (globalShortcutsRegistered) return
+  const ok1 = globalShortcut.register('CommandOrControl+Shift+D', () => {
+    // 主窗口：存在则前置，不存在则创建（不触发服务重启）
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+    } else {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  const ok2 = globalShortcut.register('Alt+D', () => {
+    // 迷你聊天窗：开/关切换
+    if (!miniWin || miniWin.isDestroyed()) {
+      createMiniWindow()
+    } else if (miniWin.isVisible()) {
+      miniWin.hide()
+    } else {
+      miniWin.show()
+      miniWin.focus()
+      sendMiniUrl()
+    }
+  })
+  const ok3 = globalShortcut.register('Alt+S', () => {
+    // 悬浮球：显隐切换
+    toggleFloat()
+  })
+  if (ok1) log('main', 'global shortcut Cmd+Shift+D: 唤起主窗 已注册')
+  if (ok2) log('main', 'global shortcut Alt+D: 切换迷你聊天 已注册')
+  if (ok3) log('main', 'global shortcut Alt+S: 切换悬浮球 已注册')
+  globalShortcutsRegistered = ok1 || ok2 || ok3
 }
 
 app.on('before-quit', () => {
   isQuitting = true
+  // 注销全局快捷键（Electron 退出时会自动做，但显式确保万无一失）
+  try { globalShortcut.unregisterAll() } catch (_) {}
   stopServer()
   stopAuthProxy()
 })
