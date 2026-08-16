@@ -25,8 +25,8 @@
 局域网内任意设备用浏览器打开上方地址，首次访问会进入登录认证界面，输入访问密码即可使用：
 
 <div align="center">
-  <img src="assets/dsh-pic-开启局域网访问-打开网站.jpg" width="320" />
   <img src="assets/dsh-pic-局域网服务登录认证界面.jpg" width="320" />
+  <img src="assets/dsh-pic-开启局域网访问-打开网站.jpg" width="320" />
 </div>
 
 **局域网连接**：连接 `127.0.0.1` 本机服务，或局域网内其他设备开启的局域网服务端。选择该模式会自动跳转到填写页面，填入 IP + 端口 + 协议（HTTP/HTTPS）即可连上远程服务。
