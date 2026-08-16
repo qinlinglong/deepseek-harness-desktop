@@ -1144,11 +1144,11 @@ function stopFloatTopWatch() {
 }
 
 // 透明窗口被其他应用（尤其最大化/全屏）覆盖后，macOS 偶发不重绘导致"图标消失"。
-// forceRefresh：隐藏 60ms 后重新显示 + moveTop，强制重绘并回到最前。
-// 注意：必须用 showInactive() 而非 show()——show() 会抢焦点，导致
-// "悬浮球失焦→重绘抢焦点→其他窗口失焦→再次重绘"的无限循环，
-// 表现为悬浮球持续闪烁且鼠标/输入焦点被夺走、无法操作其他窗口。
-// lastFloatRefresh 防抖：600ms 内只允许一次强制重绘，进一步阻断循环。
+// forceRefresh 重绘方案：用 setOpacity(0.99→1) 触发透明窗口重绘，而非 hide+show。
+// 关键修正：showInactive() 在 macOS 上不提升 z-order，会导致悬浮球被最大化
+// 窗口(level 0)盖住——这就是"最大化下悬浮球不置顶"的根因。setOpacity 不
+// 抢焦点、不改变 z-order，配合 moveTop 维持悬浮球在最高层。
+// lastFloatRefresh 防抖：600ms 内只允许一次强制重绘，阻断循环。
 let lastFloatRefresh = 0
 
 function floatToFront(forceRefresh) {
@@ -1160,17 +1160,16 @@ function floatToFront(forceRefresh) {
       const now = Date.now()
       if (now - lastFloatRefresh < 600) return
       lastFloatRefresh = now
-      const pos = floatWin.getPosition()
-      floatWin.hide()
+      // setOpacity 微小变化触发重绘，不 hide/show、不抢焦点、不丢失 z-order
+      floatWin.setOpacity(0.99)
       setTimeout(() => {
         if (!floatWin || floatWin.isDestroyed()) return
         try {
-          floatWin.setPosition(pos[0], pos[1])
+          floatWin.setOpacity(1)
           floatWin.setAlwaysOnTop(true, FLOAT_LEVEL)
-          floatWin.showInactive()
           floatWin.moveTop()
         } catch (_) {}
-      }, 60)
+      }, 30)
     }
   } catch (_) {}
 }
