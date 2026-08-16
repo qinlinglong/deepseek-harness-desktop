@@ -742,6 +742,37 @@ function restoreWindow() {
   }
 }
 
+const DSH_SETTINGS_TRIGGER = '__DSH_OPEN_SETTINGS__'
+
+function injectSettingsButton(wc) {
+  if (!wc || wc.isDestroyed()) return
+  const css = `
+    #dsh-settings-btn {
+      position: fixed; right: 14px; bottom: 96px; z-index: 2147483647;
+      width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
+      background: #1a2236cc; color: #dbe2f0; font-size: 18px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.35); backdrop-filter: blur(6px);
+      -webkit-app-region: no-drag; transition: background .15s;
+    }
+    #dsh-settings-btn:hover { background: #24304acc; }
+  `
+  const js = `(() => {
+    if (document.getElementById('dsh-settings-btn')) return
+    const s = document.createElement('style')
+    s.id = 'dsh-settings-css'
+    s.textContent = ${JSON.stringify(css)}
+    const b = document.createElement('button')
+    b.id = 'dsh-settings-btn'
+    b.title = '打开应用设置'
+    b.textContent = '⚙'
+    b.addEventListener('click', () => console.log('${DSH_SETTINGS_TRIGGER}'))
+    document.head.appendChild(s)
+    document.body.appendChild(b)
+  })()`
+  wc.executeJavaScript(js, true).catch(() => {})
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -761,6 +792,17 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow.show())
+
+  // 主界面（harness UI）注入「设置」入口，与悬浮球右键菜单对齐，打开同一设置面板
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const url = mainWindow.webContents.getURL()
+    if (!url.includes('index.html')) injectSettingsButton(mainWindow.webContents)
+  })
+  mainWindow.webContents.on('console-message', (e, level, message) => {
+    const msg = typeof message === 'string' ? message : (e && e.message)
+    if (msg === DSH_SETTINGS_TRIGGER) showSettings()
+  })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedOrigin(url)) {
