@@ -66,6 +66,16 @@ const DEFAULT_CONFIG = {
 
 const MAX_SERVER_ATTEMPTS = 5
 const SERVER_READY_TIMEOUT_MS = 20000
+const PICK_PORT_MIN = 40000
+const PICK_PORT_RANGE = 20000
+const SIGKILL_TIMEOUT_MS = 2500
+const DEBOUNCE_MS = 600
+const STALE_WAIT_MS = 800
+const PROXY_TIMEOUT_MS = 60000
+const PROBE_TIMEOUT_MS = 1200
+const FLOAT_FORCE_REFRESH_INTERVAL_MS = 600
+const READY_POLL_INTERVAL_MS = 600
+const WARMUP_DELAY_MS = 800
 
 const ICON_FILES = {
   deepseek: 'deepseek.png',
@@ -89,8 +99,8 @@ let serverProc = null
 let serverPort = null
 // 从设置页保存局域网服务端后，ready 时弹出地址框（不跳转 dsh 界面）
 let pendingLanAddressModal = false
-let serverStarting = false
 let isQuitting = false
+let lastMainWindowUrl = '' // 主窗口关闭前的 URL，用于重建时决定跳转目标
 let currentOrigin = null
 let authProxy = null // { server, proxy }
 let bootGen = 0
@@ -130,7 +140,7 @@ function loadConfig() {
   if (config.icon === 'gemini') config.icon = 'dnee'
   if (config.icon === 'default' || !ICON_FILES[config.icon]) config.icon = 'deepseek'
   if (typeof config.showFloat !== 'boolean') config.showFloat = true
-  log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} remote=${config.remoteHost || ''}:${config.remotePort}`)
+  log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} remote=${sanitizeLog((config.remoteHost || '') + ':' + config.remotePort)}`)
 }
 
 function saveConfigToDisk() {
@@ -142,8 +152,33 @@ function saveConfigToDisk() {
   }
 }
 
+// 密码哈希：scrypt KDF（自带随机盐 + 高计算成本，抗离线爆破）。
+// 存储格式 scrypt$N$r$p$salt$hash；旧版 SHA-256 格式由 verifyPassword 兼容。
+const SCRYPT_COST = 16384 // N
 function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex')
+  const hash = crypto.scryptSync(pw, salt, 32, { N: SCRYPT_COST, r: 8, p: 1 })
+  return `scrypt$${SCRYPT_COST}$8$1$${salt}$${hash.toString('hex')}`
+}
+
+// 兼容旧版：SHA-256(静态盐 + 密码)
+function hashPasswordLegacy(pw) {
   return crypto.createHash('sha256').update(PASSWORD_SALT + pw).digest('hex')
+}
+
+function verifyPassword(pw, stored) {
+  if (!stored) return false
+  if (typeof stored === 'string' && stored.startsWith('scrypt$')) {
+    try {
+      const [, N, r, p, salt, hash] = stored.split('$')
+      const calc = crypto.scryptSync(pw, salt, 32, { N: Number(N), r: Number(r), p: Number(p) })
+      return timingSafeEqualHex(calc.toString('hex'), hash)
+    } catch (_) {
+      return false
+    }
+  }
+  // 旧版 SHA-256 哈希兼容（登录成功后提示重设密码）
+  return timingSafeEqualHex(hashPasswordLegacy(pw), stored)
 }
 
 function clampInt(v, min, max, fallback) {
@@ -190,12 +225,46 @@ function applyIcon() {
 
 // ---------------- utils ----------------
 
+let logStream = null
 function log(tag, msg) {
-  console.log(`[${new Date().toISOString()}] [${tag}] ${String(msg).trimEnd()}`)
+  const line = `[${new Date().toISOString()}] [${tag}] ${String(msg).trimEnd()}`
+  console.log(line)
+  try {
+    if (!logStream) {
+      const dir = path.join(app.getPath('userData'), 'logs')
+      fs.mkdirSync(dir, { recursive: true })
+      const file = path.join(dir, 'dsh-desktop.log')
+      logStream = fs.createWriteStream(file, { flags: 'a' })
+      logStream.on('error', () => { logStream = null })
+    }
+    if (logStream) logStream.write(line + '\n')
+  } catch (_) {}
 }
+
+// 全局兜底：主进程未捕获的 rejection/异常不能静默崩溃应用（Electron 20+ 会退出）
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.stack || reason.message : String(reason)
+  log('main', `unhandledRejection: ${msg}`)
+})
+process.on('uncaughtException', (err) => {
+  const msg = err && err.stack ? err.stack : String(err)
+  log('main', `uncaughtException: ${msg}`)
+})
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// 日志脱敏：隐藏可能出现的密钥/令牌/URL 凭据（dsh 是 Agent，输出可能含敏感信息）
+function sanitizeLog(text) {
+  if (!text) return text
+  return String(text)
+    // 词边界避免误伤 ask-for-help / risk-manager 等普通词
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, 'sk-***')
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1***')
+    .replace(/(authorization:\s*)[^\s;]+/gi, '$1***')
+    .replace(/(https?:\/\/)[^/\s@]+@/g, '$1***@') // URL 中的 user:pass@（含 :）
+    .replace(/dsh_session=[A-Za-z0-9]+/g, 'dsh_session=***')
 }
 
 function dshBinPath() {
@@ -208,7 +277,7 @@ function dshBinPath() {
 
 function probe(port) {
   return new Promise((resolve) => {
-    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 1200 }, (res) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: PROBE_TIMEOUT_MS }, (res) => {
       res.resume()
       resolve(true)
     })
@@ -221,7 +290,7 @@ function probe(port) {
 }
 
 function pickPort() {
-  return 40000 + Math.floor(Math.random() * 20000)
+  return PICK_PORT_MIN + Math.floor(Math.random() * PICK_PORT_RANGE)
 }
 
 /** 从 start 起找一个空闲端口（被占用则递增），返回实际可用端口。 */
@@ -247,7 +316,7 @@ function findFreePort(start, tries = 200) {
 }
 
 /** 探测某个本机 IP 的局域网端口是否真正可访问（接口可达性）。 */
-function probeHost(ip, port, timeout = 1200) {
+function probeHost(ip, port, timeout = PROBE_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const req = http.get({ host: ip, port, path: '/', timeout }, (r) => {
       r.resume()
@@ -296,6 +365,9 @@ function isAllowedOrigin(url) {
     return false
   }
   if (currentOrigin && u.origin === currentOrigin) return true
+  // remote 模式加载的是不可信第三方页面：仅放行同源，绝不放行 loopback，
+  // 防止第三方页面把主窗口重定向到本机任意服务（本地服务探测/UI 劫持）。
+  if (config.mode === 'remote') return false
   const host = u.hostname
   return host === '127.0.0.1' || host === 'localhost' || host === '::1'
 }
@@ -339,8 +411,8 @@ function spawnServer(port) {
       child.emit('exit', -1, null)
     } catch (_) {}
   })
-  child.stdout.on('data', (d) => log('dsh', d.toString()))
-  child.stderr.on('data', (d) => log('dsh', d.toString()))
+  child.stdout.on('data', (d) => log('dsh', sanitizeLog(d.toString())))
+  child.stderr.on('data', (d) => log('dsh', sanitizeLog(d.toString())))
   child.on('exit', (code, signal) => {
     log('main', `dsh server exited code=${code} signal=${signal} (port=${port})`)
     if (!isQuitting && serverProc === child) {
@@ -382,10 +454,10 @@ async function stopServer() {
     } catch (_) {}
     const killer = setTimeout(() => {
       try { process.kill(-child.pid, 'SIGKILL') } catch (_) {}
-    }, 2500)
+    }, SIGKILL_TIMEOUT_MS)
     if (killer.unref) killer.unref()
-    // race 兜底：极端情况下 exit 事件在监听器注册前已触发，2.5s 后强制返回
-    await Promise.race([exited, sleep(2500)])
+    // race 兜底：极端情况下 exit 事件在监听器注册前已触发，超时后强制返回
+    await Promise.race([exited, sleep(SIGKILL_TIMEOUT_MS)])
     clearTimeout(killer)
   } catch (e) {
     try {
@@ -405,17 +477,24 @@ async function killStaleDshProcesses() {
     const out = spawnSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' })
     if (out.error || !out.stdout) return
     const myPid = process.pid
+    const procs = new Map() // pid -> ppid
     for (const line of out.stdout.split('\n')) {
       const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/)
       if (!m) continue
-      const [, pid, ppid, cmd] = m
-      if (String(pid) === String(myPid)) continue
-      // 仅匹配本应用的 dsh 服务进程（web 模式），避免误杀其它用途进程
-      if (!cmd.includes('@deepseek-ai/dsh') || !cmd.includes('lib/bin.js') || !cmd.includes(' web ')) continue
+      const pid = Number(m[1])
+      const ppid = Number(m[2])
+      procs.set(pid, ppid)
+      if (pid === myPid) continue
+      // 仅匹配本应用的 dsh 服务进程（web 模式）
+      if (!m[3].includes('@deepseek-ai/dsh') || !m[3].includes('lib/bin.js') || !m[3].includes(' web ')) continue
       // 正在被我们管理的进程由 stopServer 处理，这里只清残留
-      if (serverProc && String(serverProc.pid) === pid) continue
-      stale.push({ pid: Number(pid), cmd: cmd.slice(0, 80) })
+      if (serverProc && serverProc.pid === pid) continue
+      stale.push({ pid, ppid })
     }
+    // 只清理"孤儿"：父进程已死（ppid 不存在）或被 init(1) 收养（原父进程崩溃，
+    // Electron 崩溃残留的 dsh 会被 launchd 收养为 ppid=1）。
+    // 用户手动在终端运行的 dsh 父进程（shell）仍活跃，不会被误杀。
+    stale = stale.filter((s) => s.ppid === 1 || !procs.has(s.ppid))
   } catch (_) {
     return
   }
@@ -425,7 +504,7 @@ async function killStaleDshProcesses() {
     try { process.kill(s.pid, 'SIGTERM') } catch (_) {}
   }
   // 等待 SIGTERM 优雅退出，800ms 后仍未消失的强杀
-  await sleep(800)
+  await sleep(STALE_WAIT_MS)
   for (const s of stale) {
     try {
       process.kill(s.pid, 0) // 探测进程是否仍存在
@@ -452,7 +531,7 @@ function waitReady(port, child, timeoutMs) {
         clearInterval(timer)
         resolve(false)
       }
-    }, 600)
+    }, READY_POLL_INTERVAL_MS)
     timer.unref()
   })
 }
@@ -492,6 +571,18 @@ const loginFailures = new Map() // ip -> { count, until }
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000
 const MAX_LOGIN_FAILURES = 5
 const LOGIN_LOCK_MS = 5 * 60 * 1000
+
+// 定期清理过期会话/失败记录，防止 Map 无限增长（内存 DoS）
+function pruneLoginState() {
+  const now = Date.now()
+  for (const [token, exp] of loginSessions) {
+    if (exp <= now) loginSessions.delete(token)
+  }
+  for (const [ip, rec] of loginFailures) {
+    if (rec.until > 0 && rec.until <= now) loginFailures.delete(ip)
+  }
+}
+setInterval(pruneLoginState, 30 * 60 * 1000).unref() // 每 30 分钟
 
 function isLoginLocked(req) {
   const ip = req.socket.remoteAddress || ''
@@ -581,7 +672,13 @@ function handleLogin(req, res) {
     try {
       pw = new URLSearchParams(body).get('password') || ''
     } catch (_) {}
-    if (config.passwordHash && timingSafeEqualHex(hashPassword(pw), config.passwordHash)) {
+    if (config.passwordHash && verifyPassword(pw, config.passwordHash)) {
+      // 旧版 SHA-256 哈希登录成功后自动升级为 scrypt（写回 config）
+      if (!String(config.passwordHash).startsWith('scrypt$')) {
+        config.passwordHash = hashPassword(pw)
+        saveConfigToDisk()
+        log('main', 'password hash upgraded to scrypt')
+      }
       const token = crypto.randomBytes(32).toString('hex')
       loginSessions.set(token, Date.now() + SESSION_TTL_MS)
       loginFailures.delete(req.socket.remoteAddress || '')
@@ -623,6 +720,9 @@ function startAuthProxy(lanPort, targetPort) {
     // Host 与同源 Origin。这里统一改写为 loopback 身份，避免 trusted-host
     // 链路失效导致局域网用户 /api 全部 403。
     changeOrigin: true,
+    // 上游（dsh 服务）卡死时主动超时，避免 LAN socket 无限悬挂
+    proxyTimeout: PROXY_TIMEOUT_MS,
+    timeout: PROXY_TIMEOUT_MS,
   })
   proxy.on('error', (err, _req, res) => {
     log('main', `proxy web error: ${err.message}`)
@@ -715,11 +815,16 @@ function startAuthProxy(lanPort, targetPort) {
 
 function stopAuthProxy() {
   if (authProxy) {
+    const { server, proxy } = authProxy
     try {
-      authProxy.server.close()
+      // Node 18.2+：关闭所有存量 keep-alive 连接，避免悬挂 socket
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
     } catch (_) {}
     try {
-      authProxy.proxy.close()
+      server.close()
+    } catch (_) {}
+    try {
+      proxy.close()
     } catch (_) {}
     authProxy = null
   }
@@ -765,7 +870,7 @@ async function applyConfig() {
     const host = config.remoteHost || '127.0.0.1'
     const scheme = config.remoteScheme === 'https' ? 'https' : 'http'
     const url = `${scheme}://${host}:${config.remotePort}/`
-    log('main', `remote mode -> ${url}`)
+    log('main', `remote mode -> ${sanitizeLog(url)}`)
     sendStatus({ state: 'ready', message: '已连接远程服务', url, mode: 'remote' })
     loadInWindow(url)
     sendMiniUrl()
@@ -833,21 +938,32 @@ async function applyConfig() {
 // ---------------- window / tray ----------------
 
 function restoreWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  const hadWindow = !!(mainWindow && !mainWindow.isDestroyed())
+  if (!hadWindow) {
     createWindow()
   } else {
+    // 最小化窗口需显式 restore 才能可靠恢复（show 对 minimized 窗口行为不完全一致）
+    if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
   }
   if (!mainWindow || mainWindow.isDestroyed()) return
-  // 用户正在设置页时只聚焦，不跳转（避免丢失未保存的表单）
-  if (mainWindow.webContents.getURL().includes('index.html')) return
-  const url = currentWebUrl()
-  if (url) {
-    try {
-      mainWindow.webContents.loadURL(url)
-    } catch (_) {}
-  }
+
+  // 窗口已存在：恢复原样——只 show+focus，不刷新不跳转。
+  // 关键：不能再 loadURL(currentWebUrl())，否则会把 dsh harness 界面内的
+  // 设置页/任意子路由刷回根路径（最小化后恢复丢失用户所在页面）。
+  if (hadWindow) return
+
+  // 新建窗口（窗口此前被关闭）：loadFile(index.html) 异步加载中，getURL 为空。
+  // 等 index.html 加载完成后，若关闭前在设置页则保持设置页，否则跳转到主界面。
+  const target = currentWebUrl()
+  if (!target) return
+  const wasSettings = lastMainWindowUrl.includes('index.html')
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (wasSettings) return
+    try { mainWindow.webContents.loadURL(target) } catch (_) {}
+  })
 }
 
 function createWindow() {
@@ -891,7 +1007,7 @@ function createWindow() {
           saveConfigToDisk()
         }
       } catch (_) {}
-    }, 600)
+    }, DEBOUNCE_MS)
     if (saveBoundsTimer.unref) saveBoundsTimer.unref()
   }
   mainWindow.on('resize', saveBounds)
@@ -913,7 +1029,7 @@ function createWindow() {
         if (mainWindow && !mainWindow.isDestroyed() && currentWebUrl() === target) {
           try { mainWindow.webContents.loadURL(target) } catch (_) {}
         }
-      }, 800)
+      }, WARMUP_DELAY_MS)
       return
     }
     log('main', `load failed (${code}) ${url} ${desc} -> fallback to settings page`)
@@ -923,6 +1039,9 @@ function createWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedOrigin(url)) {
+      // 同源新窗口（如 dsh 前端 target=_blank/window.open）：在主窗口内导航，
+      // 而不是静默 deny 导致点击无响应
+      try { mainWindow.webContents.loadURL(url) } catch (_) {}
       return { action: 'deny' }
     }
     openExternalSafe(url)
@@ -936,6 +1055,9 @@ function createWindow() {
     }
   })
 
+  mainWindow.on('close', () => {
+    try { lastMainWindowUrl = mainWindow.webContents.getURL() } catch (_) {}
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -1028,7 +1150,7 @@ function createTray() {
       },
     },
     { type: 'separator' },
-    { label: '重启服务', click: () => applyConfig() },
+    { label: '重启服务', click: () => applyConfig().catch((e) => log('main', '托盘重启 applyConfig: ' + (e && e.message))) },
     { type: 'separator' },
     {
       label: '退出',
@@ -1105,7 +1227,12 @@ async function switchMode(mode) {
     }
     config.mode = 'lan'
     saveConfigToDisk()
-    const started = await applyConfig()
+    let started = false
+    try {
+      started = await applyConfig()
+    } catch (e) {
+      log('main', `switchMode(lan) applyConfig: ${e && e.message}`)
+    }
     if (!started) {
       dialog.showMessageBox({
         type: 'error',
@@ -1134,7 +1261,11 @@ async function switchMode(mode) {
   }
   config.mode = mode
   saveConfigToDisk()
-  await applyConfig()
+  try {
+    await applyConfig()
+  } catch (e) {
+    log('main', `switchMode(${mode}) applyConfig: ${e && e.message}`)
+  }
 }
 
 function setIcon(name) {
@@ -1290,7 +1421,7 @@ function floatToFront(forceRefresh) {
     floatWin.moveTop()
     if (forceRefresh) {
       const now = Date.now()
-      if (now - lastFloatRefresh < 600) return
+      if (now - lastFloatRefresh < FLOAT_FORCE_REFRESH_INTERVAL_MS) return
       lastFloatRefresh = now
       // setOpacity 微小变化触发重绘，不 hide/show、不抢焦点、不丢失 z-order
       floatWin.setOpacity(0.99)
@@ -1370,8 +1501,18 @@ function createFloatWindow() {
     if (!floatWin) return
     config.bubblePos = floatWin.getPosition()
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => saveConfigToDisk(), 600)
+    saveTimer = setTimeout(() => saveConfigToDisk(), DEBOUNCE_MS)
     saveTimer.unref && saveTimer.unref()
+  })
+
+  // 渲染进程崩溃（OOM/崩溃）时自动重建悬浮球，避免悬浮球静默消失
+  floatWin.webContents.on('render-process-gone', (_e, details) => {
+    log('main', `float renderer gone: ${details.reason}`)
+    if (!floatWin || floatWin.isDestroyed()) return
+    const shouldRestore = config.showFloat
+    try { floatWin.destroy() } catch (_) {}
+    floatWin = null
+    if (shouldRestore) setTimeout(() => createFloatWindow(), 300)
   })
 
   floatWin.on('closed', () => {
@@ -1443,8 +1584,9 @@ function toggleMini() {
   } else {
     reapplyMiniTop()
     positionMiniNearFloat()
-    miniWin.show()
-    miniWin.focus()
+    // showInactive：不激活 app、不切换 Space。若用 focus() 打开，第一次点击
+    // 悬浮球时 app 未激活，focus 会触发 macOS 切换到 app 所在桌面 Space（跳转桌面）。
+    miniWin.showInactive()
     sendMiniUrl()
   }
 }
@@ -1452,7 +1594,7 @@ function toggleMini() {
 // ---------------- IPC ----------------
 
 function registerIpc() {
-  ipcMain.on('dsh:restart', () => applyConfig())
+  ipcMain.on('dsh:restart', () => applyConfig().catch((e) => log('main', 'dsh:restart applyConfig: ' + (e && e.message))))
   ipcMain.on('dsh:back', () => backToMainUI())
 
   ipcMain.on('float:drag-start', () => {
@@ -1541,13 +1683,16 @@ function registerIpc() {
     }
     if (cfg && cfg.password && String(cfg.password).trim()) {
       config.passwordHash = hashPassword(String(cfg.password))
+      // 改密即吊销所有已签发的局域网登录令牌，旧令牌立即失效
+      loginSessions.clear()
+      log('main', 'password changed, all LAN login sessions revoked')
     }
     // 从设置页保存局域网服务端：ready 后弹出地址框显示 IP/端口，不直接跳转 dsh 界面
     if (mode === 'lan') pendingLanAddressModal = true
     saveConfigToDisk()
     applyIcon()
     applyFloatState()
-    applyConfig()
+    applyConfig().catch((e) => log('main', 'save-config applyConfig: ' + (e && e.message)))
     return { ok: true }
   })
 
@@ -1576,7 +1721,11 @@ async function onReady() {
   applyFloatState()
   registerScreenMetricsListener()
   registerGlobalShortcuts()
-  await applyConfig()
+  try {
+    await applyConfig()
+  } catch (e) {
+    log('main', `onReady applyConfig: ${e && e.message}`)
+  }
   // 渲染预热（借鉴豆包 warmup_render）：服务就绪后延迟 800ms 预创建迷你聊天窗
   // (show:false)，首次点击悬浮球时直接 show()，消除约 200ms 白屏。窗口轻量、
   // 后台 HTML 已缓存，预热开销极小。
@@ -1601,15 +1750,33 @@ async function onReady() {
         log('main', 'mini window warmup ready')
       }
     } catch (_) {}
-  }, 800).unref()
+  }, WARMUP_DELAY_MS).unref()
 }
 
 let _warmupMiniWin = null
 
-function createMiniWindow() {
+// 迷你窗 webview 注入精简 CSS（只留对话列，隐藏 sidebar/details）。
+// 预热/新建路径共用，避免重复代码；dom-ready 时先移除旧样式再注入。
+function setupMiniCssInjection(win) {
+  if (!win || win.isDestroyed()) return
+  win.webContents.on('did-attach-webview', (_e, guest) => {
+    let cssKey = null
+    guest.on('dom-ready', () => {
+      if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
+      guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
+    })
+  })
+}
+
+function createMiniWindow(focusAfterShow = false) {
   if (miniWin && !miniWin.isDestroyed()) {
-    miniWin.show()
-    miniWin.focus()
+    // 已存在：点击悬浮球打开用 showInactive（不切 Space），快捷键呼出才 focus
+    if (focusAfterShow) {
+      miniWin.show()
+      miniWin.focus()
+    } else {
+      miniWin.showInactive()
+    }
     return
   }
   // 复用预热窗口（如果存在且未销毁），消除首屏白屏
@@ -1623,8 +1790,12 @@ function createMiniWindow() {
     miniWin.webContents.send('mini:pin', miniPinned)
     sendMiniUrl()
     positionMiniNearFloat()
-    miniWin.show()
-    miniWin.focus()
+    if (focusAfterShow) {
+      miniWin.show()
+      miniWin.focus()
+    } else {
+      miniWin.showInactive()
+    }
     // resize 持久化（与下方新建路径一致）
     let saveMiniTimer = null
     const saveMiniBounds = () => {
@@ -1639,17 +1810,11 @@ function createMiniWindow() {
             saveConfigToDisk()
           }
         } catch (_) {}
-      }, 600)
+      }, DEBOUNCE_MS)
       if (saveMiniTimer.unref) saveMiniTimer.unref()
     }
     miniWin.on('resize', saveMiniBounds)
-    miniWin.webContents.on('did-attach-webview', (_e, guest) => {
-      let cssKey = null
-      guest.on('dom-ready', () => {
-        if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
-        guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
-      })
-    })
+    setupMiniCssInjection(miniWin)
     miniWin.on('closed', () => { miniWin = null })
     return
   }
@@ -1681,7 +1846,12 @@ function createMiniWindow() {
   miniWin.once('ready-to-show', () => {
     reapplyMiniTop()
     positionMiniNearFloat()
-    miniWin.show()
+    if (focusAfterShow) {
+      miniWin.show()
+      miniWin.focus()
+    } else {
+      miniWin.showInactive()
+    }
   })
   // 迷你窗尺寸变化时持久化（防抖 600ms）
   let saveMiniTimer = null
@@ -1697,21 +1867,23 @@ function createMiniWindow() {
           saveConfigToDisk()
         }
       } catch (_) {}
-    }, 600)
+    }, DEBOUNCE_MS)
     if (saveMiniTimer.unref) saveMiniTimer.unref()
   }
   miniWin.on('resize', saveMiniBounds)
-  miniWin.webContents.on('did-attach-webview', (_e, guest) => {
-    let cssKey = null
-    guest.on('dom-ready', () => {
-      // 每次导航先移除旧的注入样式，避免重复累积
-      if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
-      guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
-    })
-  })
+  setupMiniCssInjection(miniWin)
   miniWin.webContents.once('did-finish-load', () => {
     miniWin.webContents.send('mini:pin', miniPinned)
     sendMiniUrl()
+  })
+  // 渲染进程崩溃时：若迷你窗正在显示，自动重建；隐藏则重置引用
+  miniWin.webContents.on('render-process-gone', (_e, details) => {
+    log('main', `mini renderer gone: ${details.reason}`)
+    if (!miniWin || miniWin.isDestroyed()) return
+    const wasVisible = miniWin.isVisible()
+    try { miniWin.destroy() } catch (_) {}
+    miniWin = null
+    if (wasVisible) setTimeout(() => createMiniWindow(), 300)
   })
   miniWin.on('closed', () => {
     miniWin = null
@@ -1734,12 +1906,13 @@ function registerGlobalShortcuts() {
     }
   })
   const ok2 = globalShortcut.register('Alt+D', () => {
-    // 迷你聊天窗：开/关切换
+    // 迷你聊天窗：开/关切换。快捷键呼出需要获得焦点（可立即输入）
     if (!miniWin || miniWin.isDestroyed()) {
-      createMiniWindow()
+      createMiniWindow(true)
     } else if (miniWin.isVisible()) {
       miniWin.hide()
     } else {
+      reapplyMiniTop()
       miniWin.show()
       miniWin.focus()
       sendMiniUrl()
@@ -1755,12 +1928,20 @@ function registerGlobalShortcuts() {
   globalShortcutsRegistered = ok1 || ok2 || ok3
 }
 
-app.on('before-quit', () => {
+let gracefulQuitStarted = false
+app.on('before-quit', (e) => {
   isQuitting = true
   // 注销全局快捷键（Electron 退出时会自动做，但显式确保万无一失）
   try { globalShortcut.unregisterAll() } catch (_) {}
-  stopServer()
-  stopAuthProxy()
+  // 二次触发（优雅退出完成后 app.quit()）直接放行
+  if (gracefulQuitStarted) return
+  e.preventDefault()
+  gracefulQuitStarted = true
+  ;(async () => {
+    try { await stopServer() } catch (_) {} // 等待 dsh 进程完全退出，避免残留写坏会话日志
+    try { stopAuthProxy() } catch (_) {}
+    app.quit()
+  })()
 })
 
 app.on('window-all-closed', () => {

@@ -44,10 +44,14 @@
     let dragged = false
     let startX = 0
     let startY = 0
+    let pressTime = 0
 
     // 按下后指针移动超过该阈值才判定为拖动（macOS 系统级 click/drag 判定量级）。
-    // 单击（几乎不移动）触发打开迷你窗，拖动不触发，杜绝"拖动误打开"。
     const DRAG_THRESHOLD = 5
+    // 按住超过该时长即使位移小于阈值也判定为"非点击"：全屏 Space 下 pointermove
+    // 事件可能丢失，拖动距离检测不到，若只用位移判定会把拖动误判为点击打开迷你窗。
+    // 豆包同样逻辑：按住不松手不会触发打开。
+    const LONG_PRESS_MS = 260
 
     function cancelDrag() {
       held = false
@@ -62,6 +66,7 @@
       dragged = false
       startX = e.clientX
       startY = e.clientY
+      pressTime = Date.now()
       window.dshFloat.dragStart()
       try { b.setPointerCapture(e.pointerId) } catch (_) {}
     })
@@ -82,7 +87,8 @@
         cancelDrag()
         return
       }
-      const wasDrag = dragged
+      // 位移超阈值（拖动）或按住超时长（长按）都视为非点击，不触发打开迷你窗
+      const wasDrag = dragged || (Date.now() - pressTime > LONG_PRESS_MS)
       try { b.releasePointerCapture() } catch (_) {}
       cancelDrag()
       if (!wasDrag) window.dshFloat.toggleMini()
