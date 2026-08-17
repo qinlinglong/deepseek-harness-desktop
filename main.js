@@ -930,6 +930,7 @@ async function applyConfig() {
     }
   } else {
     sendStatus({ state: 'ready', message: '就绪', url: `http://127.0.0.1:${port}/`, mode: 'local' })
+    loadInWindow(`http://127.0.0.1:${port}/`)
   }
   sendMiniUrl()
   return true
@@ -1160,15 +1161,11 @@ function createTray() {
       },
     },
   ])
-  if (isMac) {
-    // macOS：setContextMenu 会让左键点击也弹菜单，与 click 事件冲突——
-    // 表现为"点击托盘图标主窗口闪一下"。改为：左键 = 打开主界面，右键 = 弹菜单。
-    tray.on('click', () => restoreWindow())
-    tray.on('right-click', () => tray.popUpContextMenu(menu))
-  } else {
-    tray.setContextMenu(menu)
-    tray.on('click', () => restoreWindow())
-  }
+  // 必须 setContextMenu：macOS 上不设置 context menu 会导致托盘图标在菜单栏不显示。
+  // - macOS：左键点击弹出菜单（含打开主窗口/迷你窗口/设置等），不绑 click 避免与菜单冲突
+  // - 其他平台：左键 click 打开主窗口 + 右键菜单
+  tray.setContextMenu(menu)
+  if (!isMac) tray.on('click', () => restoreWindow())
 }
 
 function showSettings(preMode) {
