@@ -87,6 +87,8 @@ let miniPinned = true
 let floatGrab = null
 let serverProc = null
 let serverPort = null
+// 从设置页保存局域网服务端后，ready 时弹出地址框（不跳转 dsh 界面）
+let pendingLanAddressModal = false
 let serverStarting = false
 let isQuitting = false
 let currentOrigin = null
@@ -763,10 +765,18 @@ async function applyConfig() {
       lanUrl,
       lanIps,
     })
+    if (pendingLanAddressModal) {
+      // 从设置页保存：弹出地址框展示 IP/端口，不跳转 dsh 界面（与"已配置后再次保存"行为一致）
+      pendingLanAddressModal = false
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('dsh:lan-address', { lanUrl, lanIps, lanPort: actualPort })
+      }
+    } else {
+      loadInWindow(`http://127.0.0.1:${port}/`)
+    }
   } else {
     sendStatus({ state: 'ready', message: '就绪', url: `http://127.0.0.1:${port}/`, mode: 'local' })
   }
-  loadInWindow(`http://127.0.0.1:${port}/`)
   sendMiniUrl()
   return true
 }
@@ -1483,12 +1493,16 @@ function registerIpc() {
     if (cfg && cfg.password && String(cfg.password).trim()) {
       config.passwordHash = hashPassword(String(cfg.password))
     }
+    // 从设置页保存局域网服务端：ready 后弹出地址框显示 IP/端口，不直接跳转 dsh 界面
+    if (mode === 'lan') pendingLanAddressModal = true
     saveConfigToDisk()
     applyIcon()
     applyFloatState()
     applyConfig()
     return { ok: true }
   })
+
+  ipcMain.on('dsh:open-external', (_e, url) => openExternalSafe(url))
 }
 
 function applyFloatState() {

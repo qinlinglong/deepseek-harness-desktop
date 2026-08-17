@@ -42,16 +42,16 @@
 
     let held = false
     let dragged = false
-    let armed = false
-    let armTimer = null
+    let startX = 0
+    let startY = 0
 
-    const ARM_DELAY = 220
+    // 按下后指针移动超过该阈值才判定为拖动（macOS 系统级 click/drag 判定量级）。
+    // 单击（几乎不移动）触发打开迷你窗，拖动不触发，杜绝"拖动误打开"。
+    const DRAG_THRESHOLD = 5
 
     function cancelDrag() {
       held = false
       dragged = false
-      armed = false
-      if (armTimer) { clearTimeout(armTimer); armTimer = null }
       b.classList.remove('dragging')
       window.dshFloat.dragEnd()
     }
@@ -60,16 +60,17 @@
       if (e.button !== 0) return
       held = true
       dragged = false
-      armed = false
-      if (armTimer) clearTimeout(armTimer)
-      armTimer = setTimeout(() => { armed = true }, ARM_DELAY)
+      startX = e.clientX
+      startY = e.clientY
       window.dshFloat.dragStart()
       try { b.setPointerCapture(e.pointerId) } catch (_) {}
     })
 
-    window.addEventListener('pointermove', () => {
+    window.addEventListener('pointermove', (e) => {
       if (!held) return
-      if (!dragged && armed) {
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (!dragged && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
         dragged = true
         b.classList.add('dragging')
       }

@@ -6,6 +6,8 @@ if (window.location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('dshDesktop', {
   onStatus: (cb) => ipcRenderer.on('dsh:status', (_e, status) => cb(status)),
   onShowSettings: (cb) => ipcRenderer.on('dsh:show-settings', (_e, mode) => cb(mode)),
+  onLanAddress: (cb) => ipcRenderer.on('dsh:lan-address', (_e, data) => cb(data)),
+  openExternal: (url) => ipcRenderer.send('dsh:open-external', url),
   restart: () => ipcRenderer.send('dsh:restart'),
   back: () => ipcRenderer.send('dsh:back'),
   getConfig: () => ipcRenderer.invoke('dsh:get-config'),
