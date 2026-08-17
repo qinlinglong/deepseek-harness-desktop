@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.3",
+  "version": "0.1.2",
   "description": "DeepSeek Harness 桌面版：免命令行安装，双击即用的 Agent Harness 桌面应用",
   "homepage": "https://github.com/qinlinglong/deepseek-harness-desktop",
   "repository": {
