@@ -1129,8 +1129,8 @@ function createTray() {
   tray = new Tray(icon)
   tray.setToolTip(APP_TITLE)
   const menu = Menu.buildFromTemplate([
-    { label: '打开主界面', click: () => restoreWindow() },
-    { label: '打开迷你聊天', click: () => toggleMini() },
+    { label: '打开主窗口', click: () => restoreWindow() },
+    { label: '打开迷你窗口', click: () => toggleMini() },
     {
       label: config.showFloat ? '隐藏悬浮球' : '显示悬浮球',
       click: () => {
@@ -1138,11 +1138,11 @@ function createTray() {
         createTray()
       },
     },
-    { label: '设置', click: () => showSettings() },
+    { label: '设置…', click: () => showSettings() },
     { type: 'separator' },
-    { label: '在浏览器中打开', click: () => openBrowserUrl() },
+    { label: '在浏览器打开', click: () => openBrowserUrl() },
     {
-      label: '复制局域网地址',
+      label: '复制访问地址',
       enabled: config.mode === 'lan',
       click: () => {
         const ips = lanIPv4s()
@@ -1153,15 +1153,22 @@ function createTray() {
     { label: '重启服务', click: () => applyConfig().catch((e) => log('main', '托盘重启 applyConfig: ' + (e && e.message))) },
     { type: 'separator' },
     {
-      label: '退出',
+      label: '退出应用',
       click: () => {
         isQuitting = true
         app.quit()
       },
     },
   ])
-  tray.setContextMenu(menu)
-  tray.on('click', () => restoreWindow())
+  if (isMac) {
+    // macOS：setContextMenu 会让左键点击也弹菜单，与 click 事件冲突——
+    // 表现为"点击托盘图标主窗口闪一下"。改为：左键 = 打开主界面，右键 = 弹菜单。
+    tray.on('click', () => restoreWindow())
+    tray.on('right-click', () => tray.popUpContextMenu(menu))
+  } else {
+    tray.setContextMenu(menu)
+    tray.on('click', () => restoreWindow())
+  }
 }
 
 function showSettings(preMode) {
