@@ -358,7 +358,7 @@ function spawnServer(port) {
   return child
 }
 
-function stopServer() {
+async function stopServer() {
   const child = serverProc
   if (!child) {
     serverPort = null
@@ -367,22 +367,69 @@ function stopServer() {
   serverProc = null
   serverPort = null
   log('main', 'stopping dsh server')
+  if (child.exitCode !== null) return
   try {
     if (process.platform === 'win32') {
       spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { timeout: 8000 })
-    } else {
-      try {
-        process.kill(-child.pid, 'SIGTERM')
-      } catch (_) {}
-      setTimeout(() => {
-        try {
-          process.kill(-child.pid, 'SIGKILL')
-        } catch (_) {}
-      }, 2500).unref()
+      return
     }
+    // 等待旧进程完全退出再返回：否则新进程启动后与未退出的旧进程可能并发
+    // 写同一个会话日志，造成 seq gap 损坏（corrupt session log: seq gap in
+    // committed region），历史对话无法加载。
+    const exited = new Promise((resolve) => child.once('exit', resolve))
+    try {
+      process.kill(-child.pid, 'SIGTERM')
+    } catch (_) {}
+    const killer = setTimeout(() => {
+      try { process.kill(-child.pid, 'SIGKILL') } catch (_) {}
+    }, 2500)
+    if (killer.unref) killer.unref()
+    // race 兜底：极端情况下 exit 事件在监听器注册前已触发，2.5s 后强制返回
+    await Promise.race([exited, sleep(2500)])
+    clearTimeout(killer)
   } catch (e) {
     try {
       child.kill('SIGKILL')
+    } catch (_) {}
+  }
+}
+
+// 清理此前崩溃/强退残留的孤儿 dsh 服务进程。dsh 用 detached:true 启动，
+// 不随 Electron 退出；主进程异常退出后残留的 dsh 会继续写会话日志，
+// 下次启动新 dsh 时两者并发写同一日志 → seq gap 损坏历史对话。
+// 仅在 startServerWithRetry 启动前调用，并等待残留进程退出。
+async function killStaleDshProcesses() {
+  if (process.platform === 'win32') return
+  let stale = []
+  try {
+    const out = spawnSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' })
+    if (out.error || !out.stdout) return
+    const myPid = process.pid
+    for (const line of out.stdout.split('\n')) {
+      const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/)
+      if (!m) continue
+      const [, pid, ppid, cmd] = m
+      if (String(pid) === String(myPid)) continue
+      // 仅匹配本应用的 dsh 服务进程（web 模式），避免误杀其它用途进程
+      if (!cmd.includes('@deepseek-ai/dsh') || !cmd.includes('lib/bin.js') || !cmd.includes(' web ')) continue
+      // 正在被我们管理的进程由 stopServer 处理，这里只清残留
+      if (serverProc && String(serverProc.pid) === pid) continue
+      stale.push({ pid: Number(pid), cmd: cmd.slice(0, 80) })
+    }
+  } catch (_) {
+    return
+  }
+  if (stale.length === 0) return
+  log('main', `stale dsh process found: ${stale.map((s) => s.pid).join(', ')}`)
+  for (const s of stale) {
+    try { process.kill(s.pid, 'SIGTERM') } catch (_) {}
+  }
+  // 等待 SIGTERM 优雅退出，800ms 后仍未消失的强杀
+  await sleep(800)
+  for (const s of stale) {
+    try {
+      process.kill(s.pid, 0) // 探测进程是否仍存在
+      process.kill(s.pid, 'SIGKILL')
     } catch (_) {}
   }
 }
@@ -681,6 +728,8 @@ function stopAuthProxy() {
 // ---------------- mode orchestration ----------------
 
 async function startServerWithRetry(gen) {
+  // 先清理崩溃残留的孤儿 dsh 进程，避免新旧 dsh 并发写同一会话日志
+  await killStaleDshProcesses()
   for (let attempt = 1; attempt <= MAX_SERVER_ATTEMPTS; attempt++) {
     const port = pickPort()
     const child = spawnServer(port)
@@ -698,7 +747,7 @@ async function startServerWithRetry(gen) {
       return { port, child }
     }
     log('main', `server failed on port ${port} (attempt ${attempt}/${MAX_SERVER_ATTEMPTS})`)
-    stopServer()
+    await stopServer()
     await sleep(300)
   }
   return null
@@ -706,7 +755,7 @@ async function startServerWithRetry(gen) {
 
 async function applyConfig() {
   const gen = ++bootGen
-  stopServer()
+  await stopServer()
   stopAuthProxy()
   // 与桌面端深色 UI 统一：未显式设置主题时，让 dsh 主窗口默认深色
   ensureDarkTheme()
@@ -734,7 +783,7 @@ async function applyConfig() {
     return false
   }
   if (!started) {
-    stopServer()
+    await stopServer()
     const winHint = process.platform === 'win32'
       ? ' 若已安装 Git for Windows（Git Bash）仍失败，请从命令行启动应用并开启日志查看具体原因（设置环境变量 ELECTRON_ENABLE_LOGGING=1）。'
       : ''
