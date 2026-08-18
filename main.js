@@ -91,12 +91,19 @@ const MINI_CSS = `
 
 let mainWindow = null
 let tray = null
+let trayMenu = null // 托盘右键菜单，供副屏"菜单栏图标"复用
+// 副屏幕上的"菜单栏图标"窗口：macOS 菜单栏 StatusItem 只显示在主显示器，
+// 为对齐豆包（每屏状态栏都有入口），给每个非主屏各建一个贴顶小图标窗口。
+const menuBarWins = new Map() // displayId -> BrowserWindow
 let floatWin = null
 let miniWin = null
 let miniPinned = true
 let floatGrab = null
 let serverProc = null
 let serverPort = null
+// remote 模式是否成功加载过目标页面：backToMainUI 未成功过则不再硬连
+// （避免回到一个从未可达的地址，卡在"正在启动服务"）
+let remoteConnectedOnce = false
 // 从设置页保存局域网服务端后，ready 时弹出地址框（不跳转 dsh 界面）
 let pendingLanAddressModal = false
 let isQuitting = false
@@ -218,6 +225,7 @@ function applyIcon() {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(img)
     if (isMac && app.dock) app.dock.setIcon(img)
     sendFloatIcon()
+    refreshMenuBarIcons()
   } catch (e) {
     log('main', `applyIcon: ${e.message}`)
   }
@@ -340,7 +348,12 @@ async function reachableLanIpsFor(port) {
   return good
 }
 
+let lastStatus = { state: 'booting', mode: 'local' }
+
 function sendStatus(status) {
+  // 记录最近一次状态：renderer 重载（backToMainUI 回退到 index.html 等）后
+  // 通过 dsh:get-status 拉取真实状态，避免停在"正在启动服务…"占位
+  lastStatus = { ...status, mode: (status && status.mode) || lastStatus.mode }
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('dsh:status', status)
   }
@@ -348,12 +361,38 @@ function sendStatus(status) {
 
 let harnessLoadTries = 0
 
+// 导航超时兜底：remote/harness 页面加载可能"挂起"（既不成功也不报错，
+// 如 TCP 连接无响应），did-fail-load 不会触发，导致启动页永久停在
+// "正在启动服务…"。12s 内未完成加载则强制回退设置页并报错。
+let navTimeout = null
+function clearNavTimeout() {
+  if (navTimeout) { clearTimeout(navTimeout); navTimeout = null }
+}
+function scheduleNavTimeout(url) {
+  clearNavTimeout()
+  const wc = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null
+  if (!wc) return
+  wc.once('did-finish-load', clearNavTimeout)
+  navTimeout = setTimeout(() => {
+    navTimeout = null
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.webContents.getURL().includes('index.html')) return
+    if (!mainWindow.webContents.isLoading()) return
+    try { mainWindow.webContents.stop() } catch (_) {}
+    log('main', `nav timeout (12s) ${sanitizeLog(url)} -> fallback to settings page`)
+    sendStatus({ state: 'error', message: `连接目标服务超时：${url}，请检查地址是否可达，或改回本机模式`, mode: config.mode })
+    try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
+  }, 12000)
+  if (navTimeout.unref) navTimeout.unref()
+}
+
 function loadInWindow(url) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   harnessLoadTries = 0
   try {
     currentOrigin = new URL(url).origin
   } catch (_) {}
+  scheduleNavTimeout(url)
   mainWindow.loadURL(url)
 }
 
@@ -872,7 +911,11 @@ async function applyConfig() {
     const url = `${scheme}://${host}:${config.remotePort}/`
     log('main', `remote mode -> ${sanitizeLog(url)}`)
     sendStatus({ state: 'ready', message: '已连接远程服务', url, mode: 'remote' })
+    remoteConnectedOnce = false
     loadInWindow(url)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.once('did-finish-load', () => { remoteConnectedOnce = true })
+    }
     sendMiniUrl()
     return true
   }
@@ -938,7 +981,18 @@ async function applyConfig() {
 
 // ---------------- window / tray ----------------
 
+function closeSettingsView() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  try {
+    // 仅 index.html 页面监听了 dsh:close-settings；dsh 界面(remote/local http)无监听，无副作用
+    mainWindow.webContents.send('dsh:close-settings')
+  } catch (_) {}
+}
+
 function restoreWindow() {
+  // 打开/恢复主窗口统一回到主界面：设置页是 SPA 视图，跨会话残留会让
+  // 托盘/Dock 单击看到的是"设置页"而非主界面（用户反馈的单击显示设置）。
+  closeSettingsView()
   const hadWindow = !!(mainWindow && !mainWindow.isDestroyed())
   if (!hadWindow) {
     createWindow()
@@ -1034,7 +1088,8 @@ function createWindow() {
       return
     }
     log('main', `load failed (${code}) ${url} ${desc} -> fallback to settings page`)
-    sendStatus({ state: 'error', message: '主界面加载失败，请检查服务后重试', mode: config.mode })
+    clearNavTimeout()
+    sendStatus({ state: 'error', message: `无法连接目标服务 ${url}，请检查地址是否可达，或改回本机模式`, mode: config.mode })
     try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
   })
 
@@ -1161,11 +1216,83 @@ function createTray() {
       },
     },
   ])
-  // 必须 setContextMenu：macOS 上不设置 context menu 会导致托盘图标在菜单栏不显示。
-  // - macOS：左键点击弹出菜单（含打开主窗口/迷你窗口/设置等），不绑 click 避免与菜单冲突
-  // - 其他平台：左键 click 打开主窗口 + 右键菜单
-  tray.setContextMenu(menu)
-  if (!isMac) tray.on('click', () => restoreWindow())
+  trayMenu = menu
+  // 参考豆包的托盘交互：
+  // - macOS：单击=打开主窗口（回主界面），右键=弹出菜单。
+  //   不能 setContextMenu——mac 上 setContextMenu 会把左键固定为弹菜单，
+  //   无法实现"单击开窗"；改用 click + 右键手动 popUpContextMenu。
+  //   若个别 mac 上图标因此不显示，回退方案是 setContextMenu（代价：单击变弹菜单）。
+  // - 其他平台：左键 click 打开主窗口 + setContextMenu 提供右键菜单
+  if (isMac) {
+    tray.on('click', () => restoreWindow())
+    tray.on('right-click', () => tray.popUpContextMenu(menu))
+  } else {
+    tray.setContextMenu(menu)
+    tray.on('click', () => restoreWindow())
+  }
+}
+
+// 副屏"菜单栏图标"：macOS 的 NSStatusItem 只能出现在主显示器菜单栏，
+// 非主屏（如扩展屏/笔记本副屏）的菜单栏没有第三方图标。对齐豆包，
+// 为每个非主屏在菜单栏位置放一个贴顶置顶小图标窗口，点击行为与托盘一致
+// （左键=打开主窗口，右键=弹托盘同款菜单）。
+function menuBarIconDataUrl() {
+  try {
+    const img = nativeImage.createFromPath(iconPath(config.icon)).resize({ width: 16, height: 16 })
+    return img.isEmpty() ? '' : img.toDataURL()
+  } catch (_) {
+    return ''
+  }
+}
+
+function syncMenuBarIcons() {
+  for (const [id, win] of menuBarWins) {
+    if (!win.isDestroyed()) win.close()
+  }
+  menuBarWins.clear()
+  if (isQuitting || !isMac) return
+  const displays = screen.getAllDisplays()
+  if (displays.length < 2) return
+  const primaryId = screen.getPrimaryDisplay().id
+  const dataUrl = menuBarIconDataUrl()
+  for (const d of displays) {
+    if (d.id === primaryId) continue // 主屏已有原生托盘图标
+    let win
+    try {
+      win = new BrowserWindow({
+        width: 26, height: 24,
+        // 屏幕右上角、菜单栏正下方紧贴：macOS 不允许窗口进入菜单栏区域
+        // （setPosition 会被 clamp 到 workArea），放在菜单栏下沿
+        // 视觉上等同"状态栏图标"，点击行为与托盘一致。
+        x: Math.round(d.bounds.x + d.bounds.width - 28),
+        y: Math.round(d.workArea.y + 2),
+        frame: false, transparent: true, resizable: false, movable: false,
+        minimizable: false, maximizable: false, closable: false,
+        fullscreenable: false, hasShadow: false, skipTaskbar: true,
+        alwaysOnTop: true, focusable: false,
+        webPreferences: {
+          preload: path.join(__dirname, 'renderer', 'menubar-preload.js'),
+          contextIsolation: true, nodeIntegration: false, sandbox: true,
+        },
+      })
+    } catch (e) {
+      log('main', 'syncMenuBarIcons create: ' + (e && e.message))
+      continue
+    }
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+    // 原生提升到菜单栏之上（level 27）：副屏图标要显示在系统菜单栏上方，
+    // 仅靠 Electron alwaysOnTop(默认 floating) 会被菜单栏窗口(level 24)盖住
+    if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(win)
+    win.loadFile(path.join(__dirname, 'renderer', 'menubar.html'))
+    const wc = win.webContents
+    wc.on('did-finish-load', () => { try { wc.send('mb:icon', dataUrl) } catch (_) {} })
+    menuBarWins.set(d.id, win)
+  }
+}
+
+function refreshMenuBarIcons() {
+  // 换图标/屏幕布局变化后刷新所有副屏图标（重新创建以确保位置正确）
+  syncMenuBarIcons()
 }
 
 function showSettings(preMode) {
@@ -1189,7 +1316,7 @@ function showSettings(preMode) {
   }
 }
 
-const ICON_LABELS = { deepseek: 'DeepSeek 官方', dnee: 'D娘' }
+const ICON_LABELS = { deepseek: 'DeepSeek（默认）', dnee: 'D娘' }
 
 function openExternalSafe(url) {
   // 仅放行 http/https，避免 file:/smb:/自定义协议等被滥用
@@ -1208,9 +1335,11 @@ function lanAccessUrls() {
 
 async function switchMode(mode) {
   if (mode === 'remote') {
-    // 局域网连接：先跳转到填写 IP/端口的设置页（复用连接设置），保存后自动连接
-    config.mode = 'remote'
-    saveConfigToDisk()
+    // 仅跳转到设置页并预选"局域网连接"：不在此处改模式/落盘。
+    // 之前这里会立即 config.mode='remote' + saveConfigToDisk()，
+    // 导致"打开设置→点返回"时 backToMainUI 按已改的 remote 配置去连
+    // 未填写的地址（默认 127.0.0.1:3080 常无服务），卡在"正在启动服务"，
+    // 且下次启动也沿用 remote。真正生效只由设置页"保存并应用"提交完成。
     showSettings('remote')
     return
   }
@@ -1229,8 +1358,8 @@ async function switchMode(mode) {
       })
       return
     }
+    const prevMode = config.mode
     config.mode = 'lan'
-    saveConfigToDisk()
     let started = false
     try {
       started = await applyConfig()
@@ -1238,6 +1367,9 @@ async function switchMode(mode) {
       log('main', `switchMode(lan) applyConfig: ${e && e.message}`)
     }
     if (!started) {
+      // 启动失败：回滚模式，避免"卡在局域网模式"且无法退出
+      config.mode = prevMode
+      saveConfigToDisk()
       dialog.showMessageBox({
         type: 'error',
         title: '局域网服务端启动失败',
@@ -1257,9 +1389,14 @@ async function switchMode(mode) {
       defaultId: 1,
       cancelId: 0,
     }).then(({ response }) => {
-      if (response === 1 && urls[0]) {
-        openExternalSafe(urls[0])
+      if (response !== 1) {
+        // 用户取消"确定开启"：回滚到原模式，恢复原服务
+        config.mode = prevMode
+        saveConfigToDisk()
+        applyConfig().catch((e) => log('main', `switchMode(lan) rollback applyConfig: ${e && e.message}`))
+        return
       }
+      if (urls[0]) openExternalSafe(urls[0])
     })
     return
   }
@@ -1341,9 +1478,15 @@ function currentWebUrl() {
   return serverPort ? `http://127.0.0.1:${serverPort}/` : null
 }
 
-// 从设置页「取消」返回主界面（当前模式的 harness / 远程页面），避免停留在启动转圈页
+// 从设置页「取消/返回」回到主界面（当前模式的 harness / 远程页面），避免停留在启动转圈页
 function backToMainUI() {
   if (!mainWindow || mainWindow.isDestroyed()) return
+  // remote 从未成功连过：不硬连不可达地址（否则一直"正在启动服务"），
+  // 回启动页展示真实状态（失败会显示错误与"设置"入口）
+  if (config.mode === 'remote' && !remoteConnectedOnce) {
+    try { mainWindow.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html')) } catch (_) {}
+    return
+  }
   const url = currentWebUrl()
   if (url) {
     loadInWindow(url)
@@ -1601,6 +1744,15 @@ function registerIpc() {
   ipcMain.on('dsh:restart', () => applyConfig().catch((e) => log('main', 'dsh:restart applyConfig: ' + (e && e.message))))
   ipcMain.on('dsh:back', () => backToMainUI())
 
+  // 副屏"菜单栏图标"：左键=打开主窗口（与托盘一致）；右键=弹托盘的菜单
+  ipcMain.on('mb:click', () => restoreWindow())
+  ipcMain.on('mb:menu', (_e, pos) => {
+    if (!trayMenu || !mainWindow || mainWindow.isDestroyed()) return
+    const x = pos && Number.isFinite(pos.x) ? pos.x : undefined
+    const y = pos && Number.isFinite(pos.y) ? pos.y : undefined
+    trayMenu.popup({ window: mainWindow, ...(x != null && y != null ? { x, y } : {}) })
+  })
+
   ipcMain.on('float:drag-start', () => {
     if (!floatWin || floatWin.isDestroyed()) return
     const pt = screen.getCursorScreenPoint()
@@ -1609,6 +1761,8 @@ function registerIpc() {
     // 拖动开始即刷新防抖：拖动期间 + 拖动后 600ms 内禁止 forceRefresh
     // 的 hide+show 重绘，否则 pointerup 后悬浮球 blur 触发重绘会让窗口闪一下
     lastFloatRefresh = Date.now()
+    // 原生强制手型光标（拖动期间窗口 setPosition 高频移动会重置 CSS 光标）
+    if (nativeFloatTop && process.platform === 'darwin') nativeFloatTop.setFloatCursor(true)
   })
   ipcMain.on('float:drag-move', () => {
     if (!floatWin || floatWin.isDestroyed() || !floatGrab) return
@@ -1616,11 +1770,15 @@ function registerIpc() {
     floatWin.setPosition(Math.round(pt.x - floatGrab.ox), Math.round(pt.y - floatGrab.oy))
     // 拖动过程中持续刷新防抖，避免 1.5s 轮询的 reapply 与高频 setPosition 叠加造成闪烁
     lastFloatRefresh = Date.now()
+    // 每次 move 都续设手型，防止 Chromium 光标更新覆盖
+    if (nativeFloatTop && process.platform === 'darwin') nativeFloatTop.setFloatCursor(true)
   })
   ipcMain.on('float:drag-end', () => {
     floatGrab = null
     // 拖动结束刷新防抖：阻断 pointerup 后 blur 触发的 forceRefresh 重绘
     lastFloatRefresh = Date.now()
+    // 恢复默认箭头光标，避免影响其他窗口
+    if (nativeFloatTop && process.platform === 'darwin') nativeFloatTop.setFloatCursor(false)
   })
   ipcMain.on('float:toggle-mini', () => toggleMini())
   ipcMain.on('float:menu', () => showFloatMenu())
@@ -1660,6 +1818,8 @@ function registerIpc() {
     }
     return out
   })
+
+  ipcMain.handle('dsh:get-status', () => lastStatus)
 
   ipcMain.handle('dsh:get-config', () => ({
     mode: config.mode,
@@ -1722,6 +1882,7 @@ async function onReady() {
   createTray()
   applyIcon()
   registerIpc()
+  syncMenuBarIcons()
   applyFloatState()
   registerScreenMetricsListener()
   registerGlobalShortcuts()
@@ -1935,6 +2096,11 @@ function registerGlobalShortcuts() {
 let gracefulQuitStarted = false
 app.on('before-quit', (e) => {
   isQuitting = true
+  // 清理副屏菜单栏图标窗口
+  for (const [id, win] of menuBarWins) {
+    if (!win.isDestroyed()) win.close()
+  }
+  menuBarWins.clear()
   // 注销全局快捷键（Electron 退出时会自动做，但显式确保万无一失）
   try { globalShortcut.unregisterAll() } catch (_) {}
   // 二次触发（优雅退出完成后 app.quit()）直接放行
@@ -1972,6 +2138,8 @@ function registerScreenMetricsListener() {
       reapplyFloatTop()
       floatWin.moveTop()
     }
+    // 显示器布局变化（拔插/改主屏）：重建副屏菜单栏图标，保证位置跟随
+    syncMenuBarIcons()
   })
 }
 

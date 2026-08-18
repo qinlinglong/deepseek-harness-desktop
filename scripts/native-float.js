@@ -39,6 +39,12 @@ let selSetCanHide = null
 let selSetHasShadow = null
 let selDisableVideoOpacitySafe = null
 
+// NSCursor（悬浮球拖动时强制手型，参考豆包拖动交互）
+let clsNSCursor = null
+let selPointingHandCursor = null
+let selArrowCursor = null
+let selSetCursor = null
+
 function init() {
   if (initialized) return true
   if (process.platform !== 'darwin') return false
@@ -62,6 +68,13 @@ function init() {
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
     selSetCanHide = selReg('setCanHide:')
+    // NSCursor：拖动悬浮球期间强制手型光标（拖动窗口频繁 setPosition 时
+    // Chromium 的重绘可能把 CSS cursor 重置为默认箭头，原生 set 保证手型）
+    const objcGetClass = libA.func('void * objc_getClass(const char *name)')
+    clsNSCursor = objcGetClass('NSCursor')
+    selPointingHandCursor = selReg('pointingHandCursor')
+    selArrowCursor = selReg('arrowCursor')
+    selSetCursor = selReg('set')
     initialized = true
     return true
   } catch (e) {
@@ -99,4 +112,24 @@ function applyNativeFloatTop(win) {
   }
 }
 
-module.exports = { applyNativeFloatTop, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+/**
+ * 强制系统光标为"手型"或"默认箭头"。
+ * 必须在主进程主线程调用（objc_msgSend 限制）。箭头光标惰性初始化，
+ * 需 NSApp 已存在（Electron 主进程总是满足，纯 node 进程会返回空）。
+ * 拖动结束务必传 false 恢复，否则会全局影响其他窗口的光标。
+ * @param {boolean} isHand
+ * @returns {boolean} 是否成功
+ */
+function setFloatCursor(isHand) {
+  if (!init()) return false
+  try {
+    const cursor = msg0(clsNSCursor, isHand ? selPointingHandCursor : selArrowCursor)
+    if (!cursor) return false
+    msg0(cursor, selSetCursor)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+module.exports = { applyNativeFloatTop, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }

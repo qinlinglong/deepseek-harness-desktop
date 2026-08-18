@@ -57,7 +57,7 @@
 
 ### 应用图标切换
 
-> 设置中可在「DeepSeek 官方 / D娘」间切换，托盘、窗口、Dock 与悬浮球图标即时生效。
+> 设置中可在「DeepSeek（默认）/ D娘」间切换，托盘、窗口、Dock 与悬浮球图标即时生效。
 
 ## 下载与安装
 
@@ -140,7 +140,7 @@ preload.js            渲染进程桥接
 renderer/index.html   启动页 + 连接设置界面
 renderer/floating.*   桌面悬浮球
 renderer/mini.*       迷你聊天窗口（webview + 顶部按钮栏）
-assets/icons/         应用图标（DeepSeek 官方 / D娘）
+assets/icons/         应用图标（DeepSeek（默认）/ D娘）
 assets/               界面截图（README 配图）
 build/                打包用图标
 scripts/gen-icon.mjs  图标生成脚本

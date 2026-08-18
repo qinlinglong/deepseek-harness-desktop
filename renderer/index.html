@@ -140,15 +140,15 @@
 
   <!-- settings -->
   <div class="settings" id="settings">
-    <h2>连接设置</h2>
-    <div class="desc">选择服务的运行方式，保存后立即生效</div>
+    <h2>设置</h2>
+    <div class="desc">选择运行模式，保存后立即生效</div>
     <form id="settingsForm">
       <div class="field">
-        <label>连接方式</label>
+        <label>运行模式</label>
         <select id="cfgMode">
-          <option value="local">本机模式 · 使用程序自带的 Agent Harness</option>
-          <option value="lan">局域网服务端 · 开启局域网服务供他人访问（需密码）</option>
-          <option value="remote">局域网连接 · 填写 IP 和端口连接服务</option>
+          <option value="local">本机模式 · 使用本机内置的 Agent</option>
+          <option value="lan">局域网服务端 · 开放给局域网内其他设备访问（需密码）</option>
+          <option value="remote">局域网连接 · 连接其他设备提供的服务</option>
         </select>
       </div>
 
@@ -156,14 +156,14 @@
         <div class="field">
           <label>局域网端口</label>
           <input id="cfgLanPort" type="number" min="1024" max="65535" value="3080" />
-          <div class="hint">开启后，浏览器或其他本客户端通过 http://本机IP:端口 访问</div>
+          <div class="hint">同一局域网内的设备可通过 http://本机IP:端口 访问</div>
         </div>
         <div class="field">
           <label>访问密码</label>
           <input id="cfgPassword" type="password" placeholder="" autocomplete="new-password" />
-          <div class="hint" id="pwHint">局域网内任何设备首次访问都需输入此密码</div>
+          <div class="hint" id="pwHint">访问此服务的设备首次使用时需输入密码</div>
         </div>
-        <div class="warn">⚠ 开启局域网服务后，局域网内知道密码的任何设备都能操作本机 Agent 并执行命令，请务必设置高强度密码，并仅在可信网络使用。</div>
+        <div class="warn">⚠ 局域网内知道密码就能操作本机 Agent 并执行命令。请设置高强度密码，仅在可信网络使用。</div>
         <div class="lan-ips" id="lanIps"></div>
       </div>
 
@@ -184,7 +184,7 @@
           </select>
           <div class="hint">默认 HTTP；启用 TLS 的服务请选择 HTTPS</div>
         </div>
-        <div class="hint">支持连接 127.0.0.1 本机服务，或局域网内其他设备开启的局域网服务端；若对方设置了密码，首次访问时需在页面中输入</div>
+        <div class="hint">连接本机或其他设备上的服务端；若设置了密码，首次访问需在页面中输入</div>
       </div>
 
       <div class="field">
@@ -199,7 +199,7 @@
       </div>
 
       <div class="actions">
-        <button type="button" class="btn ghost" id="btnBack">取消</button>
+        <button type="button" class="btn ghost" id="btnBack">返回</button>
         <button type="button" class="btn ghost danger" id="btnQuit">退出应用</button>
         <button type="submit" class="btn">保存并应用</button>
       </div>
@@ -241,6 +241,11 @@
       settings.classList.add('hidden')
       splash.classList.remove('hidden')
       $('settingsBtn').style.display = ''
+      // 每次回到主界面拉取服务真实状态：避免"返回/取消"后停留在
+      // 启动页的"正在启动服务…"占位，也不会被报告为一直转圈
+      window.dshDesktop.getStatus()
+        .then(renderStatus)
+        .catch(() => renderStatus({ state: 'booting', mode: 'local' }))
     }
 
     function showSettings(preMode) {
@@ -275,7 +280,7 @@
     $('cfgMode').addEventListener('change', toggleMode)
 
     // icon picker
-    const ICON_LABELS = { deepseek: 'DeepSeek 官方', dnee: 'D娘' }
+    const ICON_LABELS = { deepseek: 'DeepSeek（默认）', dnee: 'D娘' }
     let currentIcon = 'default'
 
     async function loadIconPicker() {
@@ -369,6 +374,9 @@
 
     window.dshDesktop.onStatus(renderStatus)
     window.dshDesktop.onShowSettings(showSettings)
+    // 托盘/外部唤起打开主窗口时切回主界面：设置页是 SPA 内视图，
+    // 停留状态会随窗口恢复残留，需主动退出设置视图回到 splash/主页。
+    window.dshDesktop.onCloseSettings(() => showSplash())
 
     // 局域网地址弹框：保存局域网服务端设置后展示 IP/端口，不自动跳转 dsh 界面。
     // 地址为纯文本可选中复制（user-select:text），"在浏览器打开"仅打开首个可达地址。
@@ -399,7 +407,9 @@
       $('ver').textContent = `桌面版 v${v.app} · dsh v${v.dsh}`
     }).catch(() => {})
 
-    renderStatus({ state: 'booting', mode: 'local' })
+    window.dshDesktop.getStatus()
+      .then(renderStatus)
+      .catch(() => renderStatus({ state: 'booting', mode: 'local' }))
   </script>
 </body>
 </html>
