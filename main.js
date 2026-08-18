@@ -1237,71 +1237,18 @@ function createTray() {
   }
 }
 
-// 副屏"菜单栏图标"：macOS 的 NSStatusItem 只能出现在主显示器菜单栏，
-// 非主屏（如扩展屏/笔记本副屏）的菜单栏没有第三方图标。对齐豆包，
-// 为每个非主屏在菜单栏位置放一个贴顶置顶小图标窗口，点击行为与托盘一致
-// （左键=打开主窗口，右键=弹托盘同款菜单）。
-function menuBarIconDataUrl() {
-  try {
-    const img = nativeImage.createFromPath(iconPath(config.icon)).resize({ width: 16, height: 16 })
-    return img.isEmpty() ? '' : img.toDataURL()
-  } catch (_) {
-    return ''
-  }
-}
-
 function syncMenuBarIcons() {
+  // 副屏原生图标：macOS 公开 API 下，NSStatusItem 只显示在"活跃显示器"
+  // 菜单栏（单实例），豆包两屏条内都有是因为用了私有 API（setScreen: +
+  // 私有回调），koffi 无法注册 ObjC IMP / CGEventTap 回调。副屏入口
+  // 由悬浮球（floatWin）覆盖，可拖到任意屏幕角落。
   for (const [id, win] of menuBarWins) {
     if (!win.isDestroyed()) win.close()
   }
   menuBarWins.clear()
-  if (isQuitting || !isMac) return
-  const displays = screen.getAllDisplays()
-  if (displays.length < 2) return
-  const dataUrl = menuBarIconDataUrl()
-  for (const d of displays) {
-    // 每屏都放胶囊兜底：原生 tray 只显示在"活跃显示器"的菜单栏（随焦点漂移），
-    // 胶囊保证任意时刻每屏都有一个入口。主屏 tray 在场时与胶囊并存。
-    let win
-    try {
-      win = new BrowserWindow({
-        width: 26, height: 26,
-        // 屏幕右上角、与菜单栏同高紧贴其下沿：视觉即"状态栏图标"。
-        // macOS 不允许普通窗口进入菜单栏条内部（setPosition 会被 clamp 到
-        // workArea），放在菜单栏正下方即可，大小/配色与菜单栏同一观感。
-        x: Math.round(d.bounds.x + d.bounds.width - 30),
-        y: Math.round(d.workArea.y),
-        frame: false, transparent: false, backgroundColor: '#2b2b2e',
-        resizable: false, movable: false,
-        minimizable: false, maximizable: false, closable: false,
-        fullscreenable: false, hasShadow: false, skipTaskbar: true,
-        alwaysOnTop: true, focusable: false,
-        webPreferences: {
-          preload: path.join(__dirname, 'renderer', 'menubar-preload.js'),
-          contextIsolation: true, nodeIntegration: false, sandbox: true,
-        },
-      })
-    } catch (e) {
-      log('main', 'syncMenuBarIcons create: ' + (e && e.message))
-      continue
-    }
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-    // 原生提升到菜单栏之上（level 27）：图标要显示在系统菜单栏上方，
-    // 仅靠 Electron alwaysOnTop(默认 floating) 会被菜单栏窗口(level 24)盖住
-    if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(win)
-    win.loadFile(path.join(__dirname, 'renderer', 'menubar.html'))
-    const wc = win.webContents
-    wc.on('did-finish-load', () => { try { wc.send('mb:icon', dataUrl) } catch (_) {} })
-    menuBarWins.set(d.id, win)
-    log('main', `menubar icon created for display ${d.id} (primary=${d.id === screen.getPrimaryDisplay().id}) at (${Math.round(d.bounds.x + d.bounds.width - 30)}, ${Math.round(d.workArea.y)})`)
-  }
-  log('main', `menubar icons: ${menuBarWins.size} windows for ${displays.length} displays`)
 }
 
-function refreshMenuBarIcons() {
-  // 换图标/屏幕布局变化后刷新所有副屏图标（重新创建以确保位置正确）
-  syncMenuBarIcons()
-}
+function refreshMenuBarIcons() { syncMenuBarIcons() }
 
 function showSettings(preMode) {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1751,15 +1698,6 @@ function toggleMini() {
 function registerIpc() {
   ipcMain.on('dsh:restart', () => applyConfig().catch((e) => log('main', 'dsh:restart applyConfig: ' + (e && e.message))))
   ipcMain.on('dsh:back', () => backToMainUI())
-
-  // 副屏"菜单栏图标"：左键=打开主窗口（与托盘一致）；右键=弹托盘的菜单
-  ipcMain.on('mb:click', () => restoreWindow())
-  ipcMain.on('mb:menu', (_e, pos) => {
-    if (!trayMenu || !mainWindow || mainWindow.isDestroyed()) return
-    const x = pos && Number.isFinite(pos.x) ? pos.x : undefined
-    const y = pos && Number.isFinite(pos.y) ? pos.y : undefined
-    trayMenu.popup({ window: mainWindow, ...(x != null && y != null ? { x, y } : {}) })
-  })
 
   ipcMain.on('float:drag-start', () => {
     if (!floatWin || floatWin.isDestroyed()) return
