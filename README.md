@@ -126,7 +126,7 @@ npm start            # 开发模式启动
 
 ### 自动发布
 
-打 `v*` tag 推送到 GitHub 即触发三平台 CI 构建，并自动创建 GitHub Release（草稿）上传三平台安装包；在 Release 页面确认后发布即可公开下载。
+打 `v*` tag 推送到 GitHub 即触发三平台 CI 构建，并自动创建 GitHub Release 上传三平台安装包（构建成功即自动发布，无需手动确认）。
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
