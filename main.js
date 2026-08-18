@@ -1176,14 +1176,6 @@ function configureAboutPanel() {
 }
 
 function createTray() {
-  let icon
-  try {
-    icon = nativeImage.createFromPath(iconPath(config.icon)).resize({ width: 18, height: 18 })
-  } catch (_) {
-    icon = nativeImage.createEmpty()
-  }
-  tray = new Tray(icon)
-  tray.setToolTip(APP_TITLE)
   const menu = Menu.buildFromTemplate([
     { label: '打开主窗口', click: () => restoreWindow() },
     { label: '打开迷你窗口', click: () => toggleMini() },
@@ -1217,6 +1209,19 @@ function createTray() {
     },
   ])
   trayMenu = menu
+
+  // 主屏：原生托盘（NSStatusItem，菜单栏条内）。实证：Electron Tray 只会显示在
+  // 主显示器菜单栏条内；副屏无法放入可点击的原生条内图标（ObjC 回调限制），
+  // 由 syncMenuBarIcons 在副屏放"紧贴菜单栏下沿"的胶囊图标兜底。
+
+  let icon
+  try {
+    icon = nativeImage.createFromPath(iconPath(config.icon)).resize({ width: 18, height: 18 })
+  } catch (_) {
+    icon = nativeImage.createEmpty()
+  }
+  tray = new Tray(icon)
+  tray.setToolTip(APP_TITLE)
   // 参考豆包的托盘交互：
   // - macOS：单击=打开主窗口（回主界面），右键=弹出菜单。
   //   不能 setContextMenu——mac 上 setContextMenu 会把左键固定为弹菜单，
@@ -1253,20 +1258,21 @@ function syncMenuBarIcons() {
   if (isQuitting || !isMac) return
   const displays = screen.getAllDisplays()
   if (displays.length < 2) return
-  const primaryId = screen.getPrimaryDisplay().id
   const dataUrl = menuBarIconDataUrl()
   for (const d of displays) {
-    if (d.id === primaryId) continue // 主屏已有原生托盘图标
+    // 每屏都放胶囊兜底：原生 tray 只显示在"活跃显示器"的菜单栏（随焦点漂移），
+    // 胶囊保证任意时刻每屏都有一个入口。主屏 tray 在场时与胶囊并存。
     let win
     try {
       win = new BrowserWindow({
-        width: 26, height: 24,
-        // 屏幕右上角、菜单栏正下方紧贴：macOS 不允许窗口进入菜单栏区域
-        // （setPosition 会被 clamp 到 workArea），放在菜单栏下沿
-        // 视觉上等同"状态栏图标"，点击行为与托盘一致。
-        x: Math.round(d.bounds.x + d.bounds.width - 28),
-        y: Math.round(d.workArea.y + 2),
-        frame: false, transparent: true, resizable: false, movable: false,
+        width: 26, height: 26,
+        // 屏幕右上角、与菜单栏同高紧贴其下沿：视觉即"状态栏图标"。
+        // macOS 不允许普通窗口进入菜单栏条内部（setPosition 会被 clamp 到
+        // workArea），放在菜单栏正下方即可，大小/配色与菜单栏同一观感。
+        x: Math.round(d.bounds.x + d.bounds.width - 30),
+        y: Math.round(d.workArea.y),
+        frame: false, transparent: false, backgroundColor: '#2b2b2e',
+        resizable: false, movable: false,
         minimizable: false, maximizable: false, closable: false,
         fullscreenable: false, hasShadow: false, skipTaskbar: true,
         alwaysOnTop: true, focusable: false,
@@ -1280,14 +1286,16 @@ function syncMenuBarIcons() {
       continue
     }
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-    // 原生提升到菜单栏之上（level 27）：副屏图标要显示在系统菜单栏上方，
+    // 原生提升到菜单栏之上（level 27）：图标要显示在系统菜单栏上方，
     // 仅靠 Electron alwaysOnTop(默认 floating) 会被菜单栏窗口(level 24)盖住
     if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(win)
     win.loadFile(path.join(__dirname, 'renderer', 'menubar.html'))
     const wc = win.webContents
     wc.on('did-finish-load', () => { try { wc.send('mb:icon', dataUrl) } catch (_) {} })
     menuBarWins.set(d.id, win)
+    log('main', `menubar icon created for display ${d.id} (primary=${d.id === screen.getPrimaryDisplay().id}) at (${Math.round(d.bounds.x + d.bounds.width - 30)}, ${Math.round(d.workArea.y)})`)
   }
+  log('main', `menubar icons: ${menuBarWins.size} windows for ${displays.length} displays`)
 }
 
 function refreshMenuBarIcons() {
@@ -2096,12 +2104,18 @@ function registerGlobalShortcuts() {
 let gracefulQuitStarted = false
 app.on('before-quit', (e) => {
   isQuitting = true
-  // 清理副屏菜单栏图标窗口
+  // 立即销毁所有界面窗口：点"退出应用"后用户即刻看到全部界面消失
+  // （曾出现主窗口迟迟不关，观感像"没退出"）
+  for (const w of [mainWindow, miniWin, floatWin]) {
+    if (w && !w.isDestroyed()) w.destroy()
+  }
   for (const [id, win] of menuBarWins) {
-    if (!win.isDestroyed()) win.close()
+    if (win && !win.isDestroyed()) win.destroy()
   }
   menuBarWins.clear()
-  // 注销全局快捷键（Electron 退出时会自动做，但显式确保万无一失）
+  // 兜底：若 stopServer/stopAuthProxy 异常卡住，4 秒后强制退出
+  setTimeout(() => { try { app.exit(0) } catch (_) {} }, 4000)
+  // 注销全局快捷键（Electron 会自动做，但显式确保万无一失）
   try { globalShortcut.unregisterAll() } catch (_) {}
   // 二次触发（优雅退出完成后 app.quit()）直接放行
   if (gracefulQuitStarted) return
