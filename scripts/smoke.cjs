@@ -17,6 +17,13 @@ function check(name, cond, detail = '') {
   console.log(`${cond ? '✓' : '✗'} ${name}${detail ? '  → ' + detail : ''}`)
 }
 
+// 与 main.js 的 MINI_CSS 保持一致（防止单独改一处造成迷你窗布局回归）
+const MINI_CSS = `
+[data-slot="sidebar"] { display: none !important; }
+[data-slot="details"] { display: none !important; }
+[class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
+`
+
 // ---------- 静态检查 ----------
 function staticChecks() {
   for (const f of ['main.js', 'preload.js', 'renderer/mini.js', 'renderer/index.html', 'scripts/native-float.js']) {
@@ -36,8 +43,9 @@ function staticChecks() {
   try { installedVer = require(path.join(ROOT, 'node_modules/@deepseek-ai/dsh/package.json')).version } catch (_) {}
   check('node_modules dsh 已装 rc.8', installedVer === '0.1.0-rc.8', installedVer)
   const mainSrc = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8')
-  check('MINI_CSS 已移除失效 _frame 规则', !mainSrc.includes('[class$="_frame"]'))
+  check('MINI_CSS 含压平 frame 左侧空白列规则', mainSrc.includes('[class$="_frame"]') && /grid-template-columns:\s*0px/.test(mainSrc))
   check('MINI_CSS 使用 data-slot 语义', mainSrc.includes('[data-slot="sidebar"]') && mainSrc.includes('[data-slot="details"]'))
+  check('spawn 带 --no-open（启动不自动开网页）', /\x27--no-open\x27/.test(mainSrc))
   try { check('package.json JSON 合法', true); fs.existsSync(path.join(ROOT, 'renderer/index.html')) && check('renderer 文件齐全', true) } catch (e) { check('package.json JSON 合法', false, e.message) }
 }
 
@@ -129,7 +137,7 @@ async function domChecks() {
     check('DOM: 侧栏/详情 data-slot 存在且未隐藏', !!info.sidebarBefore && !!info.detailsBefore && info.sidebarBefore !== 'none' && info.detailsBefore !== 'none', JSON.stringify(info))
     check('DOM: 新建会话按钮存在', !!info.hasNewSession)
     check('DOM: 对话主区/输入区存在', !!info.hasConversation && !!info.hasComposer)
-    await win.webContents.insertCSS(`\n[data-slot="sidebar"] { display: none !important; }\n[data-slot="details"] { display: none !important; }\n`)
+    await win.webContents.insertCSS(MINI_CSS)
     await new Promise((r) => setTimeout(r, 500))
     const after = await win.webContents.executeJavaScript(`(() => ({
       sidebarAfter: (() => { const el = document.querySelector('[data-slot="sidebar"]'); return el ? getComputedStyle(el).display : null })(),
@@ -137,6 +145,12 @@ async function domChecks() {
     }))()`)
     check('MINI_CSS 注入后侧栏隐藏', after.sidebarAfter === 'none', after.sidebarAfter)
     check('MINI_CSS 注入后详情隐藏', after.detailsAfter === 'none', after.detailsAfter)
+    const frameCols = await win.webContents.executeJavaScript(`(() => {
+      const f = document.querySelector('[class$="_frame"]')
+      if (!f) return null
+      return getComputedStyle(f).gridTemplateColumns
+    })()`)
+    check('MINI_CSS 压平 frame 左/右空白列', !!frameCols && /^0px \S+ 0px$/.test(frameCols), 'cols=' + frameCols)
   } catch (e) {
     check('DOM 渲染检查', false, e.message)
   }

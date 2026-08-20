@@ -5,6 +5,7 @@ const { app, BrowserWindow } = require('electron')
 const MINI_CSS = `
 [data-slot="sidebar"] { display: none !important; }
 [data-slot="details"] { display: none !important; }
+[class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 420, height: 680 })
