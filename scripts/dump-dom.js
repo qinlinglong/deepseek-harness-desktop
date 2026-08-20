@@ -1,38 +1,27 @@
+// 校验/调试：在 rc.8+ web UI 上验证 MINI_CSS（隐藏 sidebar/details）是否生效。
+// 用法：先启动 dsh web：node --expose-internals node_modules/@deepseek-ai/dsh/lib/bin.js web --host 127.0.0.1 --port 51233
+//      <local electron bin> scripts/dump-dom.js
 const { app, BrowserWindow } = require('electron')
 const MINI_CSS = `
 [data-slot="sidebar"] { display: none !important; }
 [data-slot="details"] { display: none !important; }
-[class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 420, height: 680 })
   await win.loadURL('http://127.0.0.1:51233/')
   await new Promise((r) => setTimeout(r, 6000))
-  const before = await win.webContents.executeJavaScript(`(() => {
-    const f = document.querySelector('[class$="_frame"]')
-    const s = document.querySelector('[class$="_sidebarCol"]')
-    const c = document.querySelector('[class$="_centerCol"]')
+  const measure = () => win.webContents.executeJavaScript(`(() => {
+    const disp = (sel) => { const el = document.querySelector(sel); return el ? getComputedStyle(el).display : null }
     return {
-      frameW: f ? f.getBoundingClientRect().width : null,
-      sidebarW: s ? s.getBoundingClientRect().width : null,
-      centerW: c ? c.getBoundingClientRect().width : null,
-      grid: f ? getComputedStyle(f).gridTemplateColumns : null,
+      sidebarDisplay: disp('[data-slot="sidebar"]'),
+      detailsDisplay: disp('[data-slot="details"]'),
     }
   })()`)
+  const before = await measure()
   await win.webContents.insertCSS(MINI_CSS)
   await new Promise((r) => setTimeout(r, 500))
-  const after = await win.webContents.executeJavaScript(`(() => {
-    const f = document.querySelector('[class$="_frame"]')
-    const c = document.querySelector('[class$="_centerCol"]')
-    const s = document.querySelector('[class$="_sidebarCol"]')
-    return {
-      frameW: f ? f.getBoundingClientRect().width : null,
-      centerW: c ? c.getBoundingClientRect().width : null,
-      sidebarVisible: s ? getComputedStyle(s).display !== 'none' && s.getBoundingClientRect().width > 1 : null,
-      grid: f ? getComputedStyle(f).gridTemplateColumns : null,
-    }
-  })()`)
-  console.log('BEFORE:', JSON.stringify(before))
-  console.log('AFTER :', JSON.stringify(after))
+  const after = await measure()
+  console.log('BEFORE:', JSON.stringify(before), '-> EXPECT sidebar/details = contents/flex')
+  console.log('AFTER :', JSON.stringify(after), '-> EXPECT sidebar/details = none')
   app.quit()
 })

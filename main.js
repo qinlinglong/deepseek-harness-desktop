@@ -83,10 +83,10 @@ const ICON_FILES = {
 }
 
 // CSS injected into the mini chat webview to show only the conversation column
+// （rc.8 web UI 的 layout 以 data-slot 标识侧栏/详情，隐藏后对话列自动占满）
 const MINI_CSS = `
 [data-slot="sidebar"] { display: none !important; }
 [data-slot="details"] { display: none !important; }
-[class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
 
 let mainWindow = null

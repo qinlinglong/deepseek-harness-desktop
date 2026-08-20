@@ -109,6 +109,9 @@ npm start            # 开发模式启动
 > 必须显式声明在根 `package.json` 的 `dependencies` 中（见 `cordis-plugin-group`、`dsh-fs`、
 > `dsh-shell`、`dsh-subprocess` 等）。升级 `@deepseek-ai/dsh` 后若打包版启动报
 > `ERR_MODULE_NOT_FOUND`，对照 dev 环境补齐缺失的 peer 依赖即可。
+> 当前内置 **`@deepseek-ai/dsh@0.1.0-rc.8`**（及全部 `dsh-*` 子包同版本）。升级 harness
+> 后注意 web UI 结构变化：`scripts/dump-dom.js` 与 `main.js` 的 `MINI_CSS` 均按 rc.8 的
+> `data-slot` 语义（`sidebar` / `details`）适配，旧版 `[class$="_frame"]` 网格规则已移除。
 
 ## 打包
 
