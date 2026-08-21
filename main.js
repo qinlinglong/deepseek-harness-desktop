@@ -631,6 +631,7 @@ function spawnServer(port) {
   // immediate exit so waitReady fails fast and the retry loop can move on.
   child.on('error', (err) => {
     log('main', `dsh server spawn error: ${err.message} (port=${port})`)
+    lastDshErr = 'spawn 失败: ' + (err.message || err)
     try {
       child.emit('exit', -1, null)
     } catch (_) {}
