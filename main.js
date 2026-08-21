@@ -28,6 +28,7 @@ try {
 } catch (_) {}
 
 const isMac = process.platform === 'darwin'
+const market = require('./scripts/market.js')
 const APP_TITLE = 'DeepSeek Harness'
 // 悬浮球窗口层级：用 'pop-up-menu'（NSPopUpMenuWindowLevel=101），足够高于
 // 普通/最大化窗口(0)。macOS 上由 native-float.js 原生覆盖为 level=27（豆包实测值）。
@@ -50,6 +51,13 @@ function getLoginLogoDataUrl() {
   return loginLogoDataUrl || ''
 }
 
+// 插件市场源（可自由更换的市场源，桌面端内置预设，用户可增删/切换）。
+// type 决定解析适配器：'dshmarket'=标准 plugins.json；'awesome'=HTML data-cmd；'catalog'=任意 JSON 目录。
+const DEFAULT_MARKET_SOURCES = [
+  { id: 'dshmarket', name: 'dsh.market', type: 'dshmarket', url: 'https://dsh.market/plugins.json' },
+  { id: 'awesome', name: 'awesome-dsh-plugin.com', type: 'awesome', url: 'https://awesome-dsh-plugin.com/' },
+]
+
 const DEFAULT_CONFIG = {
   mode: 'local', // 'local' | 'lan' | 'remote'
   lanPort: 3080,
@@ -62,6 +70,7 @@ const DEFAULT_CONFIG = {
   bubblePos: null,
   mainBounds: null, // {x,y,width,height} 主窗口位置尺寸，启动时恢复（借鉴豆包 chat_window 持久化）
   miniBounds: null,  // {width,height} 迷你窗尺寸
+  marketSources: DEFAULT_MARKET_SOURCES, // 插件市场源（预设 + 用户自定义）
 }
 
 const MAX_SERVER_ATTEMPTS = 5
@@ -149,6 +158,7 @@ function loadConfig() {
   if (config.icon === 'gemini') config.icon = 'dnee'
   if (config.icon === 'default' || !ICON_FILES[config.icon]) config.icon = 'deepseek'
   if (typeof config.showFloat !== 'boolean') config.showFloat = true
+  config.marketSources = normalizeMarketSources(config.marketSources)
   log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} remote=${sanitizeLog((config.remoteHost || '') + ':' + config.remotePort)}`)
 }
 
@@ -329,6 +339,9 @@ function runPromptFast(text) {
   // 渲染端在 view 就绪后注入并填入
   try { miniWin.webContents.send('mini:run-prompt', sel) } catch (_) {}
 }
+
+// ---------------- 插件市场 ----------------
+// 实现见 scripts/market.js（可单测）。这里只承接主进程调用。
 
 // ---------------- icons ----------------
 
@@ -1938,6 +1951,28 @@ function registerIpc() {
   ipcMain.handle('dsh:get-prompts', () => loadPrompts())
   ipcMain.handle('dsh:save-prompts', (_e, arr) => savePrompts(arr))
   ipcMain.on('mini:run-prompt', (_e, text) => runPromptFast(String(text || '')))
+
+  // 插件市场
+  ipcMain.handle('dsh:get-market-sources', () => config.marketSources)
+  ipcMain.handle('dsh:save-market-sources', (_e, arr) => {
+    config.marketSources = market.normalizeMarketSources(arr)
+    saveConfigToDisk()
+    return config.marketSources
+  })
+  ipcMain.handle('dsh:market-browse', async (_e, sourceId) => {
+    const s = config.marketSources.find((x) => x.id === sourceId)
+    if (!s) throw new Error('市场源不存在')
+    return market.browseMarket(s)
+  })
+  ipcMain.handle('dsh:plugin-install', async (_e, pkg) => {
+    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)])
+    return { ok: r.code === 0, log: r.log }
+  })
+  ipcMain.handle('dsh:plugin-uninstall', async (_e, pkg) => {
+    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)])
+    return { ok: r.code === 0, log: r.log }
+  })
+  ipcMain.handle('dsh:plugin-list', async () => market.listInstalledPlugins(dshBinPath(), app.getPath('home')))
 }
 
 function applyFloatState() {

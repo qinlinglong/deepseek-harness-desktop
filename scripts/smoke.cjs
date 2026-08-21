@@ -52,7 +52,39 @@ function staticChecks() {
   check('迷你窗快捷指令按钮/浮层已实现', miniSrc.includes('id="prompts"') && miniSrc.includes('promptList') && miniSrc.includes('fillComposer'))
   const preloadSrc = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8')
   check('preload 暴露 getPrompts/savePrompts', preloadSrc.includes('getPrompts') && preloadSrc.includes('savePrompts'))
+  // 插件市场静态检查
+  check('插件市场模块存在', fs.existsSync(path.join(ROOT, 'scripts', 'market.js')))
+  check('main 含插件市场 IPC', mainSrc.includes('dsh:market-browse') && mainSrc.includes('dsh:plugin-install') && mainSrc.includes('dsh:get-market-sources'))
+  check('preload 暴露市场桥接', preloadSrc.includes('marketBrowse') && preloadSrc.includes('pluginInstall') && preloadSrc.includes('getMarketSources'))
+  const idxHtml = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8')
+  check('设置页含插件市场 UI', idxHtml.includes('id="marketSrcList"') && idxHtml.includes('id="marketPlugins"') && idxHtml.includes('id="marketRefresh"'))
   try { check('package.json JSON 合法', true); fs.existsSync(path.join(ROOT, 'renderer/index.html')) && check('renderer 文件齐全', true) } catch (e) { check('package.json JSON 合法', false, e.message) }
+}
+
+// ---------- 插件市场解析检查（离线，喂样本文件） ----------
+function marketChecks() {
+  let market = null
+  try { market = require(path.join(ROOT, 'scripts', 'market.js')) } catch (e) { check('require market.js', false, e.message); return }
+  check('require market.js', true)
+  const samplesDir = '/tmp/mkt'
+  // dsh.market 标准 JSON
+  const pmFile = path.join(samplesDir, 'plugins.json')
+  if (fs.existsSync(pmFile)) {
+    const list = market.normalizeDshMarket(fs.readFileSync(pmFile, 'utf8'))
+    check('dsh.market 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
+    check('dsh.market 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
+  } else {
+    check('dsh.market 样本存在', false, '缺少 /tmp/mkt/plugins.json')
+  }
+  // awesome HTML data-cmd
+  const awFile = path.join(samplesDir, 'awesome.html')
+  if (fs.existsSync(awFile)) {
+    const list = market.normalizeAwesome(fs.readFileSync(awFile, 'utf8'))
+    check('awesome 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
+    check('awesome 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
+  } else {
+    check('awesome 样本存在', false, '缺少 /tmp/mkt/awesome.html')
+  }
 }
 
 // ---------- 起 dsh 服务（隔离 HOME，随机端口） ----------
@@ -186,6 +218,7 @@ async function domChecks() {
 app.whenReady().then(async () => {
   const t0 = Date.now()
   staticChecks()
+  marketChecks()
   const html = await serverChecks()
   if (html) await domChecks()
   else check('跳过 DOM 渲染（服务未就绪）', false)

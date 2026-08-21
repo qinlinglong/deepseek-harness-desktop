@@ -132,6 +132,41 @@
     .prompt-add input { flex: 1; }
     .prompt-add input[name="pcontent"] { flex: 2; }
     .prompt-add button { margin-top: 0; white-space: nowrap; }
+
+    /* 插件市场 */
+    .market { margin-top: 6px; }
+    .market .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .market .src-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+    .market .src-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #0d1122; border: 1px solid #2a3050; border-radius: 8px; }
+    .market .src-item .sname { font-size: 12px; color: #e6e9f5; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .market .src-item .stype { font-size: 11px; color: #6f7ba3; }
+    .market .src-item .sdel { background: transparent; border: 0; color: #ff8a8a; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+    .market .src-item .sdel:hover { background: rgba(255, 90, 90, .15); }
+    .market .src-item.active { border-color: #4d6bfe; box-shadow: 0 0 0 2px rgba(77,107,254,.35); }
+    .market .add-src input, .market .add-src select { flex: 1; width: auto; }
+    .market .add-src button { margin-top: 0; white-space: nowrap; }
+    .plugin-toolbar { display: flex; gap: 8px; margin: 10px 0; }
+    .plugin-toolbar input[type="search"] { flex: 1; }
+    .plugin-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 4px; }
+    .plugin-card { padding: 12px 14px; background: #0d1122; border: 1px solid #2a3050; border-radius: 10px; }
+    .plugin-card .pc-top { display: flex; align-items: center; gap: 8px; }
+    .plugin-card .pc-name { font-size: 13px; font-weight: 600; color: #e6e9f5; }
+    .plugin-card .pc-ver { font-size: 11px; color: #6f7ba3; }
+    .plugin-card .pc-cat { font-size: 11px; color: #7d98ff; background: rgba(125,152,255,.1); border: 1px solid rgba(125,152,255,.25); border-radius: 6px; padding: 1px 7px; }
+    .plugin-card .pc-desc { font-size: 12px; color: #9aa3c8; margin: 6px 0 10px; line-height: 1.6; }
+    .plugin-card .pc-actions { display: flex; gap: 8px; align-items: center; }
+    .plugin-card .pc-pkg { font-size: 11px; color: #6f7ba3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .plugin-card .pc-installed { font-size: 11px; color: #6ee7b7; }
+    .market .installed-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .market .installed-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #0d1122; border: 1px solid #2a3050; border-radius: 8px; }
+    .market .installed-item .iname { font-size: 12px; color: #e6e9f5; flex: 1; }
+    .market .installed-item .iver { font-size: 11px; color: #6f7ba3; }
+    .market .installed-item .idel { background: transparent; border: 0; color: #ff8a8a; cursor: pointer; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
+    .market .installed-item .idel:hover { background: rgba(255, 90, 90, .15); }
+    .market .mlog { margin-top: 10px; font-size: 11px; color: #9aa3c8; background: #0a0d1a; border: 1px solid #2a3050; border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; max-height: 140px; overflow-y: auto; display: none; }
+    .market .mlog.visible { display: block; }
+    .market .mlog.ok { color: #6ee7b7; }
+    .market .mlog.err { color: #ff8a8a; }
   </style>
 </head>
 <body>
@@ -221,6 +256,36 @@
           <input id="newPromptName" type="text" placeholder="名称，如：总结全文" />
           <input id="newPromptContent" type="text" name="pcontent" placeholder="指令内容（prompt 模板）" />
           <button type="button" class="btn" id="addPrompt">添加</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>插件市场</label>
+        <div class="hint">配置第三方市场源（可自由更换），浏览并一键安装 dsh 插件到本机。安装后需重启服务生效。</div>
+        <div class="market">
+          <div class="src-list" id="marketSrcList"></div>
+          <div class="row add-src">
+            <select id="marketType">
+              <option value="dshmarket">dsh.market 标准 JSON</option>
+              <option value="awesome">awesome 站内 HTML</option>
+              <option value="catalog">任意 catalog JSON</option>
+            </select>
+            <input id="marketName" type="text" placeholder="名称（可选）" />
+            <input id="marketUrl" type="text" placeholder="市场源地址 URL" />
+            <button type="button" class="btn" id="addMarketSrc">添加源</button>
+          </div>
+          <div class="plugin-toolbar">
+            <select id="marketActive" style="flex:0 0 200px"></select>
+            <button type="button" class="btn ghost" id="marketRefresh">浏览 / 刷新</button>
+            <input id="marketSearch" type="search" placeholder="搜索插件名 / 描述…" />
+          </div>
+          <div class="plugin-list" id="marketPlugins"></div>
+          <div class="market">
+            <div class="hint" style="margin-top:14px">已安装插件（重启服务后生效）</div>
+            <div class="installed-list" id="installedList"></div>
+            <button type="button" class="btn ghost" id="refreshInstalled" style="margin-top:8px">刷新已安装</button>
+          </div>
+          <div class="mlog" id="marketLog"></div>
         </div>
       </div>
 
@@ -346,6 +411,8 @@
       toggleMode()
       loadIconPicker()
       loadPrompts()
+      loadMarketSources()
+      refreshInstalled()
       $('settingsMsg').textContent = ''
     }
 
@@ -485,6 +552,222 @@
     window.dshDesktop.version().then((v) => {
       $('ver').textContent = `桌面版 v${v.app} · dsh v${v.dsh}`
     }).catch(() => {})
+
+    // ---------------- 插件市场 ----------------
+    let marketSources = []
+    let marketActiveId = ''
+    let marketPlugins = []
+    let installedSet = new Set()
+
+    function showMarketLog(text, cls) {
+      const el = $('marketLog')
+      el.textContent = text
+      el.className = 'mlog visible' + (cls ? ' ' + cls : '')
+    }
+    function hideMarketLog() { $('marketLog').className = 'mlog' }
+
+    async function loadMarketSources() {
+      try { marketSources = await window.dshDesktop.getMarketSources() } catch (_) { marketSources = [] }
+      if (!marketSources.length) marketSources = DEFAULT_MARKET_SOURCES_FALLBACK
+      if (!marketActiveId || !marketSources.find((s) => s.id === marketActiveId)) {
+        marketActiveId = marketSources[0] ? marketSources[0].id : ''
+      }
+      renderMarketSources()
+      renderMarketActive()
+    }
+    const DEFAULT_MARKET_SOURCES_FALLBACK = [
+      { id: 'dshmarket', name: 'dsh.market', type: 'dshmarket', url: 'https://dsh.market/plugins.json' },
+      { id: 'awesome', name: 'awesome-dsh-plugin.com', type: 'awesome', url: 'https://awesome-dsh-plugin.com/' },
+    ]
+    function renderMarketSources() {
+      const box = $('marketSrcList')
+      box.innerHTML = ''
+      if (!marketSources.length) {
+        box.innerHTML = '<div class="hint" style="margin:0">暂无市场源，请在下方添加</div>'
+        return
+      }
+      for (const s of marketSources) {
+        const row = document.createElement('div')
+        row.className = 'src-item' + (s.id === marketActiveId ? ' active' : '')
+        const name = document.createElement('span')
+        name.className = 'sname'
+        name.textContent = s.name
+        const type = document.createElement('span')
+        type.className = 'stype'
+        type.textContent = s.type
+        const del = document.createElement('button')
+        del.className = 'sdel'
+        del.textContent = '✕'
+        del.title = '删除源'
+        del.addEventListener('click', async () => {
+          marketSources = marketSources.filter((x) => x.id !== s.id)
+          if (marketActiveId === s.id) marketActiveId = marketSources[0] ? marketSources[0].id : ''
+          await window.dshDesktop.saveMarketSources(marketSources)
+          renderMarketSources()
+          renderMarketActive()
+        })
+        row.appendChild(name)
+        row.appendChild(type)
+        row.appendChild(del)
+        box.appendChild(row)
+      }
+    }
+    function renderMarketActive() {
+      const sel = $('marketActive')
+      sel.innerHTML = ''
+      for (const s of marketSources) {
+        const opt = document.createElement('option')
+        opt.value = s.id
+        opt.textContent = s.name + ' (' + s.type + ')'
+        sel.appendChild(opt)
+      }
+      sel.value = marketActiveId
+    }
+    $('addMarketSrc').addEventListener('click', async () => {
+      const type = $('marketType').value
+      const url = $('marketUrl').value.trim()
+      if (!url) return
+      const name = $('marketName').value.trim() || url
+      const src = { id: 'src-' + Date.now(), name, type, url }
+      marketSources = [...marketSources, src]
+      if (!marketActiveId) marketActiveId = src.id
+      await window.dshDesktop.saveMarketSources(marketSources)
+      $('marketName').value = ''
+      $('marketUrl').value = ''
+      renderMarketSources()
+      renderMarketActive()
+    })
+    $('marketActive').addEventListener('change', (e) => {
+      marketActiveId = e.target.value
+      marketSources.forEach((s) => s.id === marketActiveId && (marketActiveId = s.id))
+    })
+
+    async function refreshInstalled() {
+      try {
+        const list = await window.dshDesktop.pluginList()
+        installedSet = new Set(list.map((p) => p.name))
+        const box = $('installedList')
+        box.innerHTML = ''
+        if (!list.length) {
+          box.innerHTML = '<div class="hint" style="margin:0">暂无已安装插件</div>'
+        } else {
+          for (const p of list) {
+            const row = document.createElement('div')
+            row.className = 'installed-item'
+            const name = document.createElement('span')
+            name.className = 'iname'
+            name.textContent = p.name
+            const ver = document.createElement('span')
+            ver.className = 'iver'
+            ver.textContent = p.version
+            const del = document.createElement('button')
+            del.className = 'idel'
+            del.textContent = '卸载'
+            del.addEventListener('click', async () => {
+              showMarketLog('正在卸载 ' + p.name + ' …')
+              const r = await window.dshDesktop.pluginUninstall(p.name)
+              showMarketLog(r.log || (r.ok ? '卸载完成' : '卸载失败'), r.ok ? 'ok' : 'err')
+              await refreshInstalled()
+            })
+            row.appendChild(name)
+            row.appendChild(ver)
+            row.appendChild(del)
+            box.appendChild(row)
+          }
+        }
+        renderMarketPlugins()
+      } catch (e) {
+        $('installedList').innerHTML = '<div class="hint" style="margin:0">读取已安装失败：' + (e.message || e) + '</div>'
+      }
+    }
+    $('refreshInstalled').addEventListener('click', refreshInstalled)
+
+    function renderMarketPlugins() {
+      const q = ($('marketSearch').value || '').trim().toLowerCase()
+      const box = $('marketPlugins')
+      box.innerHTML = ''
+      const list = marketPlugins.filter((p) =>
+        !q || p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q))
+      if (!list.length) {
+        box.innerHTML = '<div class="hint" style="margin:0">该源暂无匹配插件，点"浏览 / 刷新"加载</div>'
+        return
+      }
+      for (const p of list) {
+        const card = document.createElement('div')
+        card.className = 'plugin-card'
+        const top = document.createElement('div')
+        top.className = 'pc-top'
+        const name = document.createElement('span')
+        name.className = 'pc-name'
+        name.textContent = p.name
+        const ver = document.createElement('span')
+        ver.className = 'pc-ver'
+        ver.textContent = p.version ? 'v' + p.version : ''
+        top.appendChild(name)
+        if (ver.textContent) top.appendChild(ver)
+        if (p.category) {
+          const cat = document.createElement('span')
+          cat.className = 'pc-cat'
+          cat.textContent = p.category
+          top.appendChild(cat)
+        }
+        const desc = document.createElement('div')
+        desc.className = 'pc-desc'
+        desc.textContent = p.description || ''
+        const actions = document.createElement('div')
+        actions.className = 'pc-actions'
+        const pkg = document.createElement('span')
+        pkg.className = 'pc-pkg'
+        pkg.textContent = p.pkg
+        pkg.title = p.pkg
+        actions.appendChild(pkg)
+        if (installedSet.has(p.pkg) || installedSet.has(p.name)) {
+          const tag = document.createElement('span')
+          tag.className = 'pc-installed'
+          tag.textContent = '已安装'
+          actions.appendChild(tag)
+        } else {
+          const btn = document.createElement('button')
+          btn.className = 'btn'
+          btn.textContent = '安装'
+          btn.addEventListener('click', async () => {
+            btn.disabled = true
+            btn.textContent = '安装中…'
+            showMarketLog('正在安装 ' + p.pkg + ' …')
+            const r = await window.dshDesktop.pluginInstall(p.pkg)
+            showMarketLog(r.log || (r.ok ? '安装完成，重启服务后生效' : '安装失败'), r.ok ? 'ok' : 'err')
+            btn.disabled = false
+            btn.textContent = '安装'
+            await refreshInstalled()
+          })
+          actions.appendChild(btn)
+        }
+        card.appendChild(top)
+        card.appendChild(desc)
+        card.appendChild(actions)
+        box.appendChild(card)
+      }
+    }
+    $('marketSearch').addEventListener('input', renderMarketPlugins)
+    $('marketRefresh').addEventListener('click', async () => {
+      const src = marketSources.find((s) => s.id === marketActiveId)
+      if (!src) { showMarketLog('请先选择或添加市场源', 'err'); return }
+      $('marketRefresh').disabled = true
+      $('marketRefresh').textContent = '加载中…'
+      showMarketLog('正在从 ' + src.url + ' 加载…')
+      try {
+        marketPlugins = await window.dshDesktop.marketBrowse(marketActiveId)
+        await refreshInstalled()
+        hideMarketLog()
+        showMarketLog('已加载 ' + marketPlugins.length + ' 个插件', 'ok')
+        setTimeout(hideMarketLog, 2500)
+      } catch (e) {
+        showMarketLog('加载失败：' + (e.message || e), 'err')
+      } finally {
+        $('marketRefresh').disabled = false
+        $('marketRefresh').textContent = '浏览 / 刷新'
+      }
+    })
 
     window.dshDesktop.getStatus()
       .then(renderStatus)
