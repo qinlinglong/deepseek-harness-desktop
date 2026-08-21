@@ -422,6 +422,44 @@ function dshBinPath() {
   return p
 }
 
+// 打包内 pnpm 的 cli 路径（asarUnpack 后落在 app.asar.unpacked/node_modules/pnpm）
+const PKG_REGISTRY = 'https://registry.npmmirror.com'
+function pnpmCliPath() {
+  let dir
+  if (process.resourcesPath && fs.existsSync(path.join(process.resourcesPath, 'app.asar.unpacked'))) {
+    dir = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pnpm')
+  } else {
+    dir = path.join(__dirname, 'node_modules', 'pnpm')
+  }
+  const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin.pnpm
+  return path.join(dir, bin)
+}
+
+// 把打包内的 pnpm 复制到 userData 形成“全局”安装。
+// 必须用全局布局：pnpm 一旦发现自己位于某项目的 node_modules 内，会试图 re-exec
+// 该项目本地的 node_modules/pnpm，而干净机器上该路径不存在 → 安装崩溃。
+function ensureGlobalPnpm() {
+  const srcDir = path.dirname(pnpmCliPath()) // <app>/node_modules/pnpm
+  const root = path.join(app.getPath('userData'), 'pnpm-global', 'node_modules')
+  const dstDir = path.join(root, 'pnpm')
+  if (!fs.existsSync(dstDir)) {
+    fs.mkdirSync(root, { recursive: true })
+    fs.cpSync(srcDir, dstDir, { recursive: true })
+  }
+  return path.join(dstDir, 'bin', 'pnpm.cjs')
+}
+
+let _shimDir = null
+function pluginEnv(homeDir) {
+  if (!_shimDir) {
+    _shimDir = path.join(app.getPath('userData'), 'shims')
+    const pnpmBin = ensureGlobalPnpm()
+    market.buildPnpmShims(_shimDir, process.execPath, pnpmBin)
+  }
+  return market.pnpmEnv(_shimDir, homeDir, PKG_REGISTRY)
+}
+
 function probe(port) {
   return new Promise((resolve) => {
     const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: PROBE_TIMEOUT_MS }, (res) => {
@@ -1965,14 +2003,14 @@ function registerIpc() {
     return market.browseMarket(s)
   })
   ipcMain.handle('dsh:plugin-install', async (_e, pkg) => {
-    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)])
+    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)], pluginEnv(app.getPath('home')))
     return { ok: r.code === 0, log: r.log }
   })
   ipcMain.handle('dsh:plugin-uninstall', async (_e, pkg) => {
-    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)])
+    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], pluginEnv(app.getPath('home')))
     return { ok: r.code === 0, log: r.log }
   })
-  ipcMain.handle('dsh:plugin-list', async () => market.listInstalledPlugins(dshBinPath(), app.getPath('home')))
+  ipcMain.handle('dsh:plugin-list', async () => market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home'))))
 }
 
 function applyFloatState() {

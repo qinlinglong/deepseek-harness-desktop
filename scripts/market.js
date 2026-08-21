@@ -244,10 +244,39 @@ async function browseMarket(source) {
 }
 
 // ---------------- 安装执行器（dsh plugin --profile web add/remove） ----------------
-function runDshPlugin(binPath, homeDir, args) {
+// 生成 pnpm/node 垫片，使打包后的 Electron（自带 Node）可在无系统 Node/pnpm 时安装插件。
+// shimDir 必须是可写目录（如 userData/shims）；electronPath 用 process.execPath，pnpmCliPath 指向打包的 pnpm。
+function buildPnpmShims(shimDir, electronPath, pnpmCliPath) {
+  require('fs').mkdirSync(shimDir, { recursive: true })
+  const e = JSON.stringify(electronPath)
+  const c = JSON.stringify(pnpmCliPath)
+  const nodeShim = '#!/bin/sh\n exec ' + e + ' --expose-internals "$@"\n'
+  const pnpmShim = '#!/bin/sh\n DIR="$(cd "$(dirname "$0")" && pwd)"\n exec "$DIR/node" ' + c + ' "$@"\n'
+  const fs = require('fs')
+  const nodePath = require('path').join(shimDir, 'node')
+  const pnpmPath = require('path').join(shimDir, 'pnpm')
+  fs.writeFileSync(nodePath, nodeShim, { mode: 0o755 })
+  fs.writeFileSync(pnpmPath, pnpmShim, { mode: 0o755 })
+  return shimDir
+}
+
+// 安装用的环境变量：把垫片目录前置到 PATH，并锁定为国内公开源（淘宝 npmmirror）。
+function pnpmEnv(shimDir, homeDir, registry) {
+  const reg = registry || 'https://registry.npmmirror.com'
+  return {
+    PATH: shimDir + require('path').delimiter + (process.env.PATH || ''),
+    ELECTRON_RUN_AS_NODE: '1',
+    HOME: homeDir,
+    npm_config_registry: reg,
+    // 市场 profile 是 pnpm workspace 根，向其直接添加依赖需放开该限制
+    npm_config_ignore_workspace_root_check: 'true',
+  }
+}
+
+async function runDshPlugin(binPath, homeDir, args, extraEnv = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ['--expose-internals', binPath, 'plugin', '--profile', 'web', ...args], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HOME: homeDir },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HOME: homeDir, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''
@@ -259,8 +288,8 @@ function runDshPlugin(binPath, homeDir, args) {
   })
 }
 
-async function listInstalledPlugins(binPath, homeDir) {
-  const r = await runDshPlugin(binPath, homeDir, ['ls'])
+async function listInstalledPlugins(binPath, homeDir, extraEnv = {}) {
+  const r = await runDshPlugin(binPath, homeDir, ['ls'], extraEnv)
   const out = r.log || ''
   const re = /((?:@[\w.-]+\/)?[\w.-]+)\s+(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)/g
   const out2 = []
@@ -282,6 +311,8 @@ module.exports = {
   browseMarket,
   parseJsonSource,
   parseHtmlSource,
+  buildPnpmShims,
+  pnpmEnv,
   runDshPlugin,
   listInstalledPlugins,
 }

@@ -90,6 +90,28 @@ function marketChecks() {
   }
 }
 
+// ---------- 自包含 pnpm：无系统 Node/pnpm 也能安装插件 ----------
+function pnpmSelfContainedCheck() {
+  let market = null
+  try { market = require(path.join(ROOT, 'scripts', 'market.js')) } catch (e) { check('require market.js', false, e.message); return }
+  const pnpmSrc = path.join(ROOT, 'node_modules', 'pnpm')
+  const pnpmBin = path.join(pnpmSrc, 'bin', 'pnpm.cjs')
+  check('pnpm 已随应用打包', fs.existsSync(pnpmBin), pnpmBin)
+  if (!fs.existsSync(pnpmBin)) return
+  // 复制成“全局”布局（避免 pnpm 误判为项目本地而 re-exec 失败）
+  const gRoot = path.join(os.tmpdir(), 'dsh-smoke-pnpm', 'node_modules')
+  const gDst = path.join(gRoot, 'pnpm')
+  if (!fs.existsSync(gDst)) { fs.mkdirSync(gRoot, { recursive: true }); fs.cpSync(pnpmSrc, gDst, { recursive: true }) }
+  const shimDir = path.join(os.tmpdir(), 'dsh-smoke-shims')
+  market.buildPnpmShims(shimDir, process.execPath, path.join(gDst, 'bin', 'pnpm.cjs'))
+  const env = market.pnpmEnv(shimDir, process.env.HOME, 'https://registry.npmmirror.com')
+  const binPath = path.join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  return market.runDshPlugin(binPath, process.env.HOME, ['ls'], env).then((r) => {
+    const bad = /pnpm not found|Cannot find module .*node_modules\/pnpm/.test(r.log || '')
+    check('自包含 pnpm 可运行（无需系统 pnpm/node）', !bad, bad ? (r.log || '').split('\n')[0] : 'exit=' + r.code)
+  })
+}
+
 // ---------- 起 dsh 服务（隔离 HOME，随机端口） ----------
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -222,6 +244,7 @@ app.whenReady().then(async () => {
   const t0 = Date.now()
   staticChecks()
   marketChecks()
+  await pnpmSelfContainedCheck()
   const html = await serverChecks()
   if (html) await domChecks()
   else check('跳过 DOM 渲染（服务未就绪）', false)
