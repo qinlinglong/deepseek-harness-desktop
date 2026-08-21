@@ -71,6 +71,7 @@
       "preload.js",
       "renderer/**",
       "assets/**",
+      "scripts/market.js",
       "scripts/native-float.js",
       "node_modules/**"
     ],
