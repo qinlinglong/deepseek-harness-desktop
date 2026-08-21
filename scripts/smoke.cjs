@@ -71,6 +71,9 @@ function staticChecks() {
   check('native-float 导出 revertNativeFloatTop', nativeFloatSrc.includes('function revertNativeFloatTop') && nativeFloatSrc.includes('revertNativeFloatTop'))
   check('main 取消置顶撤销原生层级', mainSrc.includes('revertNativeFloatTop'))
   check('悬浮球菜单含隐藏项', mainSrc.includes("label: '隐藏悬浮球'"))
+  // 防止 market 方法被裸调用（如 normalizeMarketSources 忘写 market. 前缀 → 启动时 ReferenceError）
+  const bareMarketCall = /[^.\w](normalizeMarketSources|runDshPlugin|listInstalledPlugins|browseMarket|buildPnpmShims|pnpmEnv)\(/.test(mainSrc)
+  check('main 中 market 方法均带 market. 前缀', !bareMarketCall)
 }
 
 // ---------- 插件市场解析检查（离线，喂样本文件，走声明式引擎） ----------

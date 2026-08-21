@@ -166,7 +166,7 @@ function loadConfig() {
   if (config.icon === 'gemini') config.icon = 'dnee'
   if (config.icon === 'default' || !ICON_FILES[config.icon]) config.icon = 'deepseek'
   if (typeof config.showFloat !== 'boolean') config.showFloat = true
-  config.marketSources = normalizeMarketSources(config.marketSources)
+  config.marketSources = market.normalizeMarketSources(config.marketSources)
   log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} remote=${sanitizeLog((config.remoteHost || '') + ':' + config.remotePort)}`)
 }
 
