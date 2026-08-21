@@ -15,6 +15,8 @@ if (window.location.protocol === 'file:') {
   getConfig: () => ipcRenderer.invoke('dsh:get-config'),
   saveConfig: (cfg) => ipcRenderer.invoke('dsh:save-config', cfg),
   getIcons: () => ipcRenderer.invoke('dsh:get-icons'),
+  getPrompts: () => ipcRenderer.invoke('dsh:get-prompts'),
+  savePrompts: (arr) => ipcRenderer.invoke('dsh:save-prompts', arr),
   version: () => ipcRenderer.invoke('dsh:version'),
   quit: () => ipcRenderer.send('dsh:quit'),
   })

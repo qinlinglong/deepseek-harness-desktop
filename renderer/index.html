@@ -117,6 +117,21 @@
     .icon-opt.selected .label { color: #7d98ff; font-weight: 600; }
     .field label.check { display: flex; align-items: center; gap: 8px; font-weight: 500; color: #cdd3ea; cursor: pointer; }
     .field label.check input { width: 15px; height: 15px; accent-color: #4d6bfe; }
+    .prompt-manage { margin-top: 4px; }
+    .prompt-manage .prow {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: #0d1122; border: 1px solid #2a3050; border-radius: 8px; margin-bottom: 6px;
+    }
+    .prompt-manage .prow .pname { font-size: 12px; color: #e6e9f5; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .prompt-manage .prow .pbody { font-size: 11px; color: #6f7ba3; flex: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .prompt-manage .prow .pdel {
+      background: transparent; border: 0; color: #ff8a8a; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 6px;
+    }
+    .prompt-manage .prow .pdel:hover { background: rgba(255, 90, 90, .15); }
+    .prompt-add { display: flex; gap: 8px; margin-top: 4px; }
+    .prompt-add input { flex: 1; }
+    .prompt-add input[name="pcontent"] { flex: 2; }
+    .prompt-add button { margin-top: 0; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -196,6 +211,17 @@
       <div class="field">
         <label class="check"><input type="checkbox" id="cfgShowFloat" /> 启用桌面悬浮球</label>
         <div class="hint">桌面角落的圆形小图标，点击打开迷你聊天窗口，可拖到任意位置</div>
+      </div>
+
+      <div class="field">
+        <label>快捷指令 / 提词器</label>
+        <div class="hint">一组常用提问模板，一键填入迷你聊天输入框；也可在迷你窗顶部的 ⚡ 按钮中快速调用</div>
+        <div class="prompt-manage" id="promptManage"></div>
+        <div class="prompt-add">
+          <input id="newPromptName" type="text" placeholder="名称，如：总结全文" />
+          <input id="newPromptContent" type="text" name="pcontent" placeholder="指令内容（prompt 模板）" />
+          <button type="button" class="btn" id="addPrompt">添加</button>
+        </div>
       </div>
 
       <div class="actions">
@@ -319,6 +345,7 @@
       $('cfgShowFloat').checked = cfg.showFloat !== false
       toggleMode()
       loadIconPicker()
+      loadPrompts()
       $('settingsMsg').textContent = ''
     }
 
@@ -344,6 +371,58 @@
         msgEl.className = 'smsg err'
         msgEl.textContent = res.error || '保存失败'
       }
+    })
+
+    // 快捷指令 / 提词器（独立即时保存，不依赖"保存并应用"）
+    let promptList = []
+    async function renderPrompts() {
+      const box = $('promptManage')
+      box.innerHTML = ''
+      if (!promptList.length) {
+        box.innerHTML = '<div class="hint" style="margin:0">暂无自定义指令，下方添加</div>'
+        return
+      }
+      for (const p of promptList) {
+        const row = document.createElement('div')
+        row.className = 'prow'
+        const name = document.createElement('span')
+        name.className = 'pname'
+        name.textContent = p.name
+        const body = document.createElement('span')
+        body.className = 'pbody'
+        body.textContent = p.content
+        body.title = p.content
+        const del = document.createElement('button')
+        del.className = 'pdel'
+        del.textContent = '✕'
+        del.title = '删除'
+        del.addEventListener('click', async () => {
+          promptList = promptList.filter((x) => x.id !== p.id)
+          await window.dshDesktop.savePrompts(promptList)
+          renderPrompts()
+        })
+        row.appendChild(name)
+        row.appendChild(body)
+        row.appendChild(del)
+        box.appendChild(row)
+      }
+    }
+    async function loadPrompts() {
+      try { promptList = await window.dshDesktop.getPrompts() } catch (_) { promptList = [] }
+      renderPrompts()
+    }
+    $('addPrompt').addEventListener('click', async () => {
+      const name = $('newPromptName').value.trim()
+      const content = $('newPromptContent').value.trim()
+      if (!name || !content) return
+      promptList = [
+        ...promptList,
+        { id: 'p' + Date.now(), name, content },
+      ]
+      await window.dshDesktop.savePrompts(promptList)
+      $('newPromptName').value = ''
+      $('newPromptContent').value = ''
+      renderPrompts()
     })
 
     function renderStatus(s) {

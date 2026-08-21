@@ -206,6 +206,130 @@ function lanIPv4s() {
   return [...new Set(out)]
 }
 
+// ---------------- 快捷指令 / 提词器 ----------------
+
+const DEFAULT_PROMPTS = [
+  { id: 'p-summarize', name: '总结全文', content: '请用中文简洁总结这段内容，提炼关键要点与结论。' },
+  { id: 'p-explain', name: '解释代码', content: '请详细解释以下代码/内容的作用、执行流程与关键细节。' },
+  { id: 'p-refactor', name: '优化重构', content: '请审查这段内容，给出优化建议并输出重构后的版本。' },
+  { id: 'p-fix', name: '修复 Bug', content: '请定位并修复其中的问题，解释根因，输出修改后的完整代码。' },
+  { id: 'p-translate', name: '翻译成中文', content: '请将以下内容翻译成通顺的中文，保留专业术语。' },
+]
+
+function promptsFile() {
+  return path.join(app.getPath('userData'), 'prompts.json')
+}
+
+let promptsCache = null
+function normalPrompts(arr) {
+  return (Array.isArray(arr) ? arr : [])
+    .filter((p) => p && p.name && p.content)
+    .map((p, i) => ({
+      id: String(p.id || 'p' + i + '-' + Date.now()),
+      name: String(p.name).slice(0, 50),
+      content: String(p.content),
+    }))
+}
+function loadPrompts() {
+  if (promptsCache) return promptsCache
+  let arr = []
+  try { arr = JSON.parse(fs.readFileSync(promptsFile(), 'utf8')) } catch (_) {}
+  if (!Array.isArray(arr) || arr.length === 0) arr = DEFAULT_PROMPTS
+  promptsCache = normalPrompts(arr)
+  return promptsCache
+}
+function savePrompts(arr) {
+  promptsCache = normalPrompts(arr)
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true })
+    fs.writeFileSync(promptsFile(), JSON.stringify(promptsCache, null, 2), { mode: 0o600 })
+  } catch (e) {
+    log('main', `savePrompts: ${e.message}`)
+  }
+  return promptsCache
+}
+
+// 往 dsh 页面输入框安全填入文本（React 受控组件需走原生 setter + input 事件）
+function injectComposerText(webContents, text, opts = {}) {
+  if (!webContents || webContents.isDestroyed()) return
+  const json = JSON.stringify(String(text || ''))
+  const newSession = opts.newSession !== false
+  const js = `(() => {
+    const fill = () => {
+      const ta = document.querySelector('textarea:not([readonly])')
+      if (!ta) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      setter.call(ta, ${json})
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      return true
+    }
+    if (${newSession}) {
+      const b = document.querySelector('button[aria-label="新建会话"]')
+      if (b) b.click()
+    }
+    if (fill()) return 'ok'
+    let tries = 0
+    return new Promise((res) => {
+      const t = setInterval(() => { if (fill() || ++tries > 25) { clearInterval(t); res('ok') } }, 200)
+      setTimeout(() => { clearInterval(t); res('ok') }, 6000)
+    })
+  })()`
+  try { webContents.executeJavaScript(js).catch(() => {}) } catch (_) {}
+}
+
+// 划词唤起：把选中文本作为新会话提问（弥合全局快捷键只能"唤起"不能"带内容"的缺口，
+// 对齐豆包"划词即问"——在主窗/迷你窗的 dsh 页面里右键选中文案即可触发）
+function askWithSelection(text) {
+  const sel = String(text || '').trim()
+  if (!sel) return
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+  else {
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  // 等待主窗加载到目标页（dsh 界面）后填入
+  const tryInject = () => {
+    const url = (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) ? mainWindow.webContents.getURL() : ''
+    if (/^https?:\/\//.test(url) || /index\.html/.test(url)) {
+      injectComposerText(mainWindow.webContents, sel, { newSession: true })
+      return true
+    }
+    if (tryInject._t++ > 40) return true
+    setTimeout(tryInject, 250)
+    return false
+  }
+  tryInject._t = 0
+  tryInject()
+}
+
+function setupSelectionAsk(webContents) {
+  if (!webContents || webContents.isDestroyed()) return
+  webContents.on('context-menu', (_e, params) => {
+    const sel = (params.selectionText || '').trim()
+    if (!sel) return
+    const label = sel.length > 26 ? sel.slice(0, 26) + '…' : sel
+    const menu = Menu.buildFromTemplate([
+      {
+        label: `用 DeepSeek 提问：${label}`,
+        click: () => askWithSelection(sel),
+      },
+    ])
+    try { menu.popup() } catch (_) {}
+  })
+}
+
+function runPromptFast(text) {
+  const sel = String(text || '')
+  if (!miniWin || miniWin.isDestroyed()) createMiniWindow(true)
+  else {
+    reapplyMiniTop()
+    miniWin.show()
+    miniWin.focus()
+  }
+  // 渲染端在 view 就绪后注入并填入
+  try { miniWin.webContents.send('mini:run-prompt', sel) } catch (_) {}
+}
+
 // ---------------- icons ----------------
 
 function iconPath(name) {
@@ -1047,6 +1171,7 @@ function createWindow() {
   })
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  setupSelectionAsk(mainWindow.webContents)
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
   // 主窗口位置/尺寸变化时持久化（防抖 600ms）
@@ -1809,6 +1934,10 @@ function registerIpc() {
   })
 
   ipcMain.on('dsh:open-external', (_e, url) => openExternalSafe(url))
+
+  ipcMain.handle('dsh:get-prompts', () => loadPrompts())
+  ipcMain.handle('dsh:save-prompts', (_e, arr) => savePrompts(arr))
+  ipcMain.on('mini:run-prompt', (_e, text) => runPromptFast(String(text || '')))
 }
 
 function applyFloatState() {
@@ -1873,6 +2002,7 @@ let _warmupMiniWin = null
 function setupMiniCssInjection(win) {
   if (!win || win.isDestroyed()) return
   win.webContents.on('did-attach-webview', (_e, guest) => {
+    setupSelectionAsk(guest)
     let cssKey = null
     guest.on('dom-ready', () => {
       if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})

@@ -27,11 +27,32 @@
     .bar .btn:hover { background: #262d52; }
     .bar .btn.active { color: #7d98ff; background: rgba(77, 107, 254, .2); }
     webview { flex: 1; border: 0; }
+    .prompts-wrap { position: relative; }
+    .prompt-list {
+      position: absolute; top: 34px; left: 52px; width: 240px; max-height: 320px; overflow-y: auto;
+      background: #141927; border: 1px solid #2a3050; border-radius: 12px; z-index: 50;
+      padding: 6px; display: none; box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
+    }
+    .prompt-list.open { display: block; }
+    .prompt-list .pli {
+      padding: 8px 10px; border-radius: 8px; font-size: 12px; color: #cdd3ea; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .prompt-list .pli:hover { background: #262d52; color: #fff; }
+    .prompt-list .pli.empty { color: #6f7ba3; cursor: default; }
   </style>
 </head>
 <body>
   <div class="bar">
     <span class="title">DeepSeek Harness · 迷你聊天</span>
+    <div class="prompts-wrap">
+      <button class="btn" id="prompts" title="快捷指令">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2 4.1 12.5H11L9.5 22 20.5 10.5H13z"/>
+        </svg>
+      </button>
+      <div class="prompt-list" id="promptList"></div>
+    </div>
     <button class="btn" id="newChat" title="新对话">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M12 5v14M5 12h14"/>

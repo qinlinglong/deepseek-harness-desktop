@@ -46,6 +46,12 @@ function staticChecks() {
   check('MINI_CSS 含压平 frame 左侧空白列规则', mainSrc.includes('[class$="_frame"]') && /grid-template-columns:\s*0px/.test(mainSrc))
   check('MINI_CSS 使用 data-slot 语义', mainSrc.includes('[data-slot="sidebar"]') && mainSrc.includes('[data-slot="details"]'))
   check('spawn 带 --no-open（启动不自动开网页）', /\x27--no-open\x27/.test(mainSrc))
+  check('快捷指令 data/IPC 已实现', mainSrc.includes('DEFAULT_PROMPTS') && mainSrc.includes('dsh:get-prompts') && mainSrc.includes('mini:run-prompt'))
+  check('划词唤起已实现', mainSrc.includes('setupSelectionAsk') && mainSrc.includes('params.selectionText') && mainSrc.includes('askWithSelection'))
+  const miniSrc = fs.readFileSync(path.join(ROOT, 'renderer/mini.html'), 'utf8') + fs.readFileSync(path.join(ROOT, 'renderer/mini.js'), 'utf8')
+  check('迷你窗快捷指令按钮/浮层已实现', miniSrc.includes('id="prompts"') && miniSrc.includes('promptList') && miniSrc.includes('fillComposer'))
+  const preloadSrc = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8')
+  check('preload 暴露 getPrompts/savePrompts', preloadSrc.includes('getPrompts') && preloadSrc.includes('savePrompts'))
   try { check('package.json JSON 合法', true); fs.existsSync(path.join(ROOT, 'renderer/index.html')) && check('renderer 文件齐全', true) } catch (e) { check('package.json JSON 合法', false, e.message) }
 }
 
@@ -151,6 +157,26 @@ async function domChecks() {
       return getComputedStyle(f).gridTemplateColumns
     })()`)
     check('MINI_CSS 压平 frame 左/右空白列', !!frameCols && /^0px \S+ 0px$/.test(frameCols), 'cols=' + frameCols)
+    const filled = await win.webContents.executeJavaScript(`(async () => {
+      const ta = Array.from(document.querySelectorAll('textarea')).find((t) => !t.readOnly) || null
+      // 引导态（未选择工作区）只有一个只读下拉 textarea，无真实输入框 —— 合法状态
+      if (!ta) {
+        const readonlyTa = document.querySelector('textarea[readonly]')
+        return { state: readonlyTa ? 'guide-inert' : 'no-input', readonly: !!readonlyTa }
+      }
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      const spy = []
+      ta.addEventListener('input', () => spy.push(1))
+      setter.call(ta, 'smoke-test-prompt')
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      const immediate = ta.value
+      await new Promise((r) => setTimeout(r, 500))
+      return { state: 'composer', immediate, after: ta.value, spy: spy.length, ph: ta.placeholder }
+    })()`)
+    const injectOk = filled.state === 'composer'
+      ? String(filled.immediate + '|' + (filled.after || '')).includes('smoke-test-prompt')
+      : (filled.state === 'guide-inert' || filled.state === 'no-input') // 引导/无输入态：校验不报错即可
+    check('快捷指令输入框注入有效（会话态）或安全跳过（引导态）', !!injectOk, JSON.stringify(filled))
   } catch (e) {
     check('DOM 渲染检查', false, e.message)
   }
