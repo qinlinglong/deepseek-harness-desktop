@@ -75,8 +75,8 @@ const DEFAULT_CONFIG = {
   marketSources: DEFAULT_MARKET_SOURCES, // 插件市场源（预设 + 用户自定义）
 }
 
-const MAX_SERVER_ATTEMPTS = 5
-const SERVER_READY_TIMEOUT_MS = 20000
+const MAX_SERVER_ATTEMPTS = 3
+const SERVER_READY_TIMEOUT_MS = 12000
 const PICK_PORT_MIN = 40000
 const PICK_PORT_RANGE = 20000
 const SIGKILL_TIMEOUT_MS = 2500
@@ -125,6 +125,7 @@ let currentOrigin = null
 let authProxy = null // { server, proxy }
 let bootGen = 0
 let reachableLanIps = []
+let lastDshErr = '' // 最近一次 dsh 服务进程的 stderr（用于启动失败时回显报错）
 // remote 模式下远端桌面服务的能力与登录态（供插件远程安装路由使用）
 let remoteCapable = false // 远端是否为桌面版服务（暴露 /desktop/* 端点）
 let remoteCapableAuthError = false // 远端是桌面版但密码错误
@@ -635,7 +636,11 @@ function spawnServer(port) {
     } catch (_) {}
   })
   child.stdout.on('data', (d) => log('dsh', sanitizeLog(d.toString())))
-  child.stderr.on('data', (d) => log('dsh', sanitizeLog(d.toString())))
+  child.stderr.on('data', (d) => {
+    const s = d.toString()
+    lastDshErr = (lastDshErr + s).slice(-2048)
+    log('dsh', sanitizeLog(s))
+  })
   child.on('exit', (code, signal) => {
     log('main', `dsh server exited code=${code} signal=${signal} (port=${port})`)
     if (!isQuitting && serverProc === child) {
@@ -1092,6 +1097,7 @@ async function startServerWithRetry(gen) {
 
 async function applyConfig() {
   const gen = ++bootGen
+  try {
   await stopServer()
   stopAuthProxy()
   // 与桌面端深色 UI 统一：未显式设置主题时，让 dsh 主窗口默认深色
@@ -1127,10 +1133,14 @@ async function applyConfig() {
   }
   if (!started) {
     await stopServer()
+    const errTail = lastDshErr.trim().split('\n').filter(Boolean).slice(-4).join('  |  ')
     const winHint = process.platform === 'win32'
       ? ' 若已安装 Git for Windows（Git Bash）仍失败，请从命令行启动应用并开启日志查看具体原因（设置环境变量 ELECTRON_ENABLE_LOGGING=1）。'
       : ''
-    sendStatus({ state: 'error', message: `本地服务启动失败，已重试 ${MAX_SERVER_ATTEMPTS} 次。${winHint}` })
+    sendStatus({
+      state: 'error',
+      message: `本地服务启动失败，已重试 ${MAX_SERVER_ATTEMPTS} 次。${errTail ? 'dsh 报错：' + errTail : '常见原因：端口被占用、dsh 依赖损坏或被安全软件拦截。'}${winHint}`,
+    })
     return false
   }
   const port = started.port
@@ -1172,6 +1182,11 @@ async function applyConfig() {
   }
   sendMiniUrl()
   return true
+  } catch (e) {
+    log('main', 'applyConfig threw: ' + ((e && e.stack) || e))
+    sendStatus({ state: 'error', message: '启动异常：' + ((e && e.message) || e) })
+    return false
+  }
 }
 
 // ---------------- window / tray ----------------
