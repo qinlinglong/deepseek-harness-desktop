@@ -113,6 +113,31 @@ function applyNativeFloatTop(win) {
 }
 
 /**
+ * 撤销 applyNativeFloatTop：还原为普通窗口（取消"全屏/所有 Space 置顶"）。
+ * 否则仅调 Electron setAlwaysOnTop(false) 无法覆盖原生 setLevel(27)，
+ * 导致"取消置顶"在 macOS 上失效。
+ * @param {Electron.BrowserWindow} win
+ * @returns {boolean} 是否成功
+ */
+function revertNativeFloatTop(win) {
+  if (!win || win.isDestroyed()) return false
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow) return false
+    // 还原为普通窗口层级(NSNormalWindowLevel=0)与默认集合行为
+    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, 0)
+    if (selSetLevel) msg1(nsWindow, selSetLevel, 0)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+/**
  * 强制系统光标为"手型"或"默认箭头"。
  * 必须在主进程主线程调用（objc_msgSend 限制）。箭头光标惰性初始化，
  * 需 NSApp 已存在（Electron 主进程总是满足，纯 node 进程会返回空）。
@@ -132,4 +157,4 @@ function setFloatCursor(isHand) {
   }
 }
 
-module.exports = { applyNativeFloatTop, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }

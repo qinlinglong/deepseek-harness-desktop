@@ -14,6 +14,7 @@ const {
 const { spawn, spawnSync } = require('node:child_process')
 const net = require('node:net')
 const http = require('node:http')
+const https = require('node:https')
 const os = require('node:os')
 const crypto = require('node:crypto')
 const path = require('node:path')
@@ -65,6 +66,7 @@ const DEFAULT_CONFIG = {
   remoteHost: '',
   remotePort: 3080,
   remoteScheme: 'http', // 'http' | 'https'
+  remotePassword: '', // 远端桌面 lan 服务的访问密码（用于 /_auth/login 拿 cookie 调 /desktop/*）
   icon: 'deepseek', // 'deepseek' | 'dnee'
   showFloat: true,
   bubblePos: null,
@@ -123,6 +125,10 @@ let currentOrigin = null
 let authProxy = null // { server, proxy }
 let bootGen = 0
 let reachableLanIps = []
+// remote 模式下远端桌面服务的能力与登录态（供插件远程安装路由使用）
+let remoteCapable = false // 远端是否为桌面版服务（暴露 /desktop/* 端点）
+let remoteCapableAuthError = false // 远端是桌面版但密码错误
+let cachedRemoteCookie = '' // 远端 /_auth/login 拿到的会话 cookie
 let config = { ...DEFAULT_CONFIG }
 
 if (!app.requestSingleInstanceLock()) {
@@ -155,6 +161,7 @@ function loadConfig() {
   config.remotePort = clampInt(config.remotePort, 1, 65535, DEFAULT_CONFIG.remotePort)
   config.remoteScheme = config.remoteScheme === 'https' ? 'https' : 'http'
   config.remoteHost = String(config.remoteHost || '').replace(/^https?:\/\//, '')
+  config.remotePassword = String(config.remotePassword || '')
   if (config.icon === 'gemini') config.icon = 'dnee'
   if (config.icon === 'default' || !ICON_FILES[config.icon]) config.icon = 'deepseek'
   if (typeof config.showFloat !== 'boolean') config.showFloat = true
@@ -993,6 +1000,15 @@ function startAuthProxy(lanPort, targetPort) {
       res.end('Not Found')
       return
     }
+    // 桌面专属端点：供 remote 模式客户端远程安装/管理插件（需登录）
+    if (req.url && req.url.startsWith('/desktop/')) {
+      if (!hasValidCookie(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'unauthorized' }))
+        return
+      }
+      return handleDesktopApi(req, res)
+    }
     if (!hasValidCookie(req)) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       res.end(loginPage())
@@ -1094,6 +1110,8 @@ async function applyConfig() {
       mainWindow.webContents.once('did-finish-load', () => { remoteConnectedOnce = true })
     }
     sendMiniUrl()
+    // 探测远端是否为桌面版服务（决定能否远程安装插件）
+    detectRemoteCapability().catch((e) => log('main', 'detectRemoteCapability: ' + (e && e.message)))
     return true
   }
 
@@ -1301,6 +1319,128 @@ function remoteUrl() {
   const host = config.remoteHost || '127.0.0.1'
   const scheme = config.remoteScheme === 'https' ? 'https' : 'http'
   return `${scheme}://${host}:${config.remotePort}/`
+}
+
+function remoteBaseUrl() {
+  const host = config.remoteHost || '127.0.0.1'
+  const scheme = config.remoteScheme === 'https' ? 'https' : 'http'
+  return `${scheme}://${host}:${config.remotePort}`
+}
+
+// 对远端桌面 lan 服务发起一次 HTTP 请求（带可选会话 cookie），返回 {status, json, text}
+function remoteRequest(method, path, { body, cookie } = {}) {
+  return new Promise((resolve) => {
+    const lib = config.remoteScheme === 'https' ? https : http
+    const u = new URL(remoteBaseUrl() + path)
+    const headers = {}
+    if (cookie) headers.cookie = cookie
+    if (body != null) {
+      const buf = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
+      headers['content-type'] = typeof body === 'string'
+        ? 'application/x-www-form-urlencoded'
+        : 'application/json'
+      headers['content-length'] = buf.length
+    }
+    const req = lib.request(
+      { method, hostname: u.hostname, port: u.port, path, headers },
+      (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => {
+          let json = null
+          try { json = JSON.parse(data) } catch (_) {}
+          resolve({ status: res.statusCode, headers: res.headers, json, text: data })
+        })
+      }
+    )
+    req.on('error', () => resolve(null))
+    req.setTimeout(PROXY_TIMEOUT_MS, () => { try { req.destroy() } catch (_) {} resolve(null) })
+    if (body != null) req.write(typeof body === 'string' ? body : JSON.stringify(body))
+    req.end()
+  })
+}
+
+// 用远端密码登录桌面 lan 服务，返回 { ok, authFail, cookie }
+async function loginRemoteDesktop() {
+  const r = await remoteRequest('POST', '/_auth/login', {
+    body: 'password=' + encodeURIComponent(config.remotePassword || ''),
+  })
+  if (!r) return { ok: false, authFail: false }
+  const setCookie = r.headers && r.headers['set-cookie']
+  if (setCookie && setCookie.length) {
+    const m = String(setCookie[0]).match(/dsh_session=[^;]+/)
+    if (m) return { ok: true, authFail: false, cookie: m[0] }
+  }
+  if (r.status === 401 || r.status === 403) return { ok: false, authFail: true }
+  return { ok: false, authFail: false }
+}
+
+// 探测远端是否为桌面版服务（暴露 /desktop/info）。
+// 结果写入 remoteCapable / remoteCapableAuthError / cachedRemoteCookie 并推送到渲染层。
+// 判定：登录成功 + /desktop/info 返回 {desktop:true} → 可远程安装；
+// 登录 404（无 /_auth/login）→ 裸 harness；登录 401 → 桌面版但密码错。
+async function detectRemoteCapability() {
+  if (config.mode !== 'remote') {
+    remoteCapable = false
+    remoteCapableAuthError = false
+    cachedRemoteCookie = ''
+    return
+  }
+  const login = await loginRemoteDesktop()
+  if (!login.ok) {
+    remoteCapable = false
+    remoteCapableAuthError = !!login.authFail
+    cachedRemoteCookie = ''
+    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: !!login.authFail })
+    return
+  }
+  cachedRemoteCookie = login.cookie
+  const info = await remoteRequest('GET', '/desktop/info', { cookie: cachedRemoteCookie })
+  remoteCapable = !!(info && info.json && info.json.desktop === true)
+  remoteCapableAuthError = false
+  sendStatus({ mode: 'remote', remoteCapable, remoteCapableAuthError: false })
+}
+
+// 桌面 lan 服务专属端点（需登录）：供 remote 模式客户端远程安装插件。
+async function handleDesktopApi(req, res) {
+  const url = (req.url || '/').split('?')[0]
+  res.setHeader('content-type', 'application/json')
+  if (req.method === 'GET' && url === '/desktop/info') {
+    res.writeHead(200)
+    res.end(JSON.stringify({ desktop: true, version: app.getVersion() }))
+    return
+  }
+  if (req.method === 'POST' && url === '/desktop/plugin-install') {
+    let body = ''
+    req.on('data', (c) => (body += c))
+    req.on('end', async () => {
+      let pkg = '', action = 'add'
+      try { const o = JSON.parse(body); pkg = String(o.pkg || ''); action = o.action === 'remove' ? 'remove' : 'add' } catch (_) {}
+      if (!pkg) { res.writeHead(400); res.end(JSON.stringify({ ok: false, log: '缺少包名' })); return }
+      try {
+        const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), [action, pkg], pluginEnv(app.getPath('home')))
+        res.writeHead(200)
+        res.end(JSON.stringify({ ok: r.code === 0, log: r.log }))
+      } catch (e) {
+        res.writeHead(500)
+        res.end(JSON.stringify({ ok: false, log: String((e && e.message) || e) }))
+      }
+    })
+    return
+  }
+  if (req.method === 'GET' && url === '/desktop/plugin-list') {
+    try {
+      const list = await market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home')))
+      res.writeHead(200)
+      res.end(JSON.stringify(list))
+    } catch (e) {
+      res.writeHead(500)
+      res.end(JSON.stringify({ ok: false, log: String((e && e.message) || e) }))
+    }
+    return
+  }
+  res.writeHead(404)
+  res.end(JSON.stringify({ ok: false, error: 'not found' }))
 }
 
 function openBrowserUrl() {
@@ -1582,20 +1722,19 @@ function showFloatMenu() {
             reapplyFloatTop()
           } else {
             floatWin._floatOnTop = false
-            // 取消置顶：还原 Electron 默认 level 并关 visibleOnAllWorkspaces
-            if (nativeFloatTop && process.platform === 'darwin') {
-              // 原生已控制 level，取消时让 Electron 接管 setAlwaysOnTop(false)
-              floatWin.setAlwaysOnTop(false)
-            } else {
-              floatWin.setAlwaysOnTop(false)
-            }
+            // 取消置顶：还原 level + 关 visibleOnAllWorkspaces，
+            // 并撤销 macOS 原生 setLevel(27)/collectionBehavior，否则原生层级残留导致无法取消置顶
+            floatWin.setAlwaysOnTop(false)
             floatWin.setVisibleOnAllWorkspaces(false)
+            if (nativeFloatTop && process.platform === 'darwin') nativeFloatTop.revertNativeFloatTop(floatWin)
           }
         }
       },
     },
     { type: 'separator' },
     { label: '打开设置', click: () => showSettings() },
+    { type: 'separator' },
+    { label: '隐藏悬浮球', click: () => toggleFloat() },
     { type: 'separator' },
     { label: '退出应用', click: () => { isQuitting = true; app.quit() } },
   ])
@@ -1831,6 +1970,10 @@ function reapplyMiniTop() {
       }
     } else {
       miniWin.setAlwaysOnTop(false)
+      if (isMac) {
+        try { miniWin.setVisibleOnAllWorkspaces(false) } catch (_) {}
+        if (nativeFloatTop) nativeFloatTop.revertNativeFloatTop(miniWin)
+      }
     }
   } catch (_) {}
 }
@@ -1951,6 +2094,9 @@ function registerIpc() {
     remoteHost: config.remoteHost,
     remotePort: config.remotePort,
     remoteScheme: config.remoteScheme,
+    remotePassword: config.remotePassword || '',
+    remoteCapable,
+    remoteCapableAuthError,
     hasPassword: !!config.passwordHash,
     lanIps: lanIPv4s(),
     icon: config.icon,
@@ -1964,6 +2110,7 @@ function registerIpc() {
     config.remotePort = clampInt(cfg && cfg.remotePort, 1, 65535, 3080)
     config.remoteHost = String((cfg && cfg.remoteHost) || '').trim().replace(/^https?:\/\//, '')
     config.remoteScheme = cfg && cfg.remoteScheme === 'https' ? 'https' : 'http'
+    config.remotePassword = String((cfg && cfg.remotePassword) || '')
     if (ICON_FILES[cfg && cfg.icon]) config.icon = cfg.icon
     if (cfg && typeof cfg.showFloat === 'boolean') config.showFloat = cfg.showFloat
     if (mode === 'lan' && !config.passwordHash && !(cfg && cfg.password && String(cfg.password).trim())) {
@@ -2003,14 +2150,41 @@ function registerIpc() {
     return market.browseMarket(s)
   })
   ipcMain.handle('dsh:plugin-install', async (_e, pkg) => {
+    if (config.mode === 'remote') {
+      if (!remoteCapable) {
+        return { ok: false, log: '远端不是桌面版服务，无法远程安装。请在该服务端执行 `dsh plugin --profile web add ' + String(pkg) + '`' + (remoteCapableAuthError ? '（远端密码错误）' : '') }
+      }
+      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: JSON.stringify({ pkg: String(pkg), action: 'add' }) })
+      if (!r) return { ok: false, log: '无法连接远端桌面服务' }
+      if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
+      return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
+    }
     const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)], pluginEnv(app.getPath('home')))
     return { ok: r.code === 0, log: r.log }
   })
   ipcMain.handle('dsh:plugin-uninstall', async (_e, pkg) => {
+    if (config.mode === 'remote') {
+      if (!remoteCapable) {
+        return { ok: false, log: '远端不是桌面版服务，无法远程卸载。请在该服务端执行 `dsh plugin --profile web remove ' + String(pkg) + '`' + (remoteCapableAuthError ? '（远端密码错误）' : '') }
+      }
+      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: JSON.stringify({ pkg: String(pkg), action: 'remove' }) })
+      if (!r) return { ok: false, log: '无法连接远端桌面服务' }
+      if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
+      return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
+    }
     const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], pluginEnv(app.getPath('home')))
     return { ok: r.code === 0, log: r.log }
   })
-  ipcMain.handle('dsh:plugin-list', async () => market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home'))))
+  ipcMain.handle('dsh:plugin-list', async () => {
+    if (config.mode === 'remote') {
+      if (!remoteCapable) return []
+      const r = await remoteRequest('GET', '/desktop/plugin-list', { cookie: cachedRemoteCookie })
+      if (!r || r.status === 401) return []
+      if (r.json && Array.isArray(r.json)) return r.json
+      return []
+    }
+    return market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home')))
+  })
 }
 
 function applyFloatState() {

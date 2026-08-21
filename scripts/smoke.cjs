@@ -59,6 +59,18 @@ function staticChecks() {
   const idxHtml = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8')
   check('设置页含插件市场 UI', idxHtml.includes('id="marketSrcList"') && idxHtml.includes('id="marketPlugins"') && idxHtml.includes('id="marketRefresh"'))
   try { check('package.json JSON 合法', true); fs.existsSync(path.join(ROOT, 'renderer/index.html')) && check('renderer 文件齐全', true) } catch (e) { check('package.json JSON 合法', false, e.message) }
+  // 远程安装（方案 A）静态检查
+  check('lan 代理暴露桌面端点 /desktop/info', mainSrc.includes("'/desktop/info'") && mainSrc.includes('handleDesktopApi'))
+  check('远端能力探测 detectRemoteCapability', mainSrc.includes('function detectRemoteCapability') && mainSrc.includes('remoteCapable'))
+  check('远端安装路由到 /desktop/plugin-install', mainSrc.includes("'/desktop/plugin-install'") && mainSrc.includes('remoteRequest'))
+  check('远端密码配置 remotePassword', mainSrc.includes('remotePassword'))
+  check('渲染层含远端密码字段', idxHtml.includes('id="cfgRemotePassword"'))
+  check('渲染层按远端能力置灰安装按钮', idxHtml.includes("远端不可装"))
+  // 原生置顶可撤销（取消置顶在 macOS 生效）
+  const nativeFloatSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'native-float.js'), 'utf8')
+  check('native-float 导出 revertNativeFloatTop', nativeFloatSrc.includes('function revertNativeFloatTop') && nativeFloatSrc.includes('revertNativeFloatTop'))
+  check('main 取消置顶撤销原生层级', mainSrc.includes('revertNativeFloatTop'))
+  check('悬浮球菜单含隐藏项', mainSrc.includes("label: '隐藏悬浮球'"))
 }
 
 // ---------- 插件市场解析检查（离线，喂样本文件，走声明式引擎） ----------
