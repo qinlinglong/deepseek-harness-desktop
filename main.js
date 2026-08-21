@@ -1342,8 +1342,9 @@ function remoteBaseUrl() {
   return `${scheme}://${host}:${config.remotePort}`
 }
 
-// 对远端桌面 lan 服务发起一次 HTTP 请求（带可选会话 cookie），返回 {status, json, text}
-function remoteRequest(method, path, { body, cookie } = {}) {
+// 对远端桌面 lan 服务发起一次 HTTP 请求（带可选会话 cookie），返回 {status, json, text}。
+// timeoutMs：整体超时（含 TCP 连接），超时或出错时 resolve(null)。
+function remoteRequest(method, path, { body, cookie, timeoutMs } = {}) {
   return new Promise((resolve) => {
     const lib = config.remoteScheme === 'https' ? https : http
     const u = new URL(remoteBaseUrl() + path)
@@ -1356,20 +1357,27 @@ function remoteRequest(method, path, { body, cookie } = {}) {
         : 'application/json'
       headers['content-length'] = buf.length
     }
+    let settled = false
+    const done = (v) => { if (!settled) { settled = true; resolve(v) } }
     const req = lib.request(
       { method, hostname: u.hostname, port: u.port, path, headers },
       (res) => {
         let data = ''
         res.on('data', (c) => (data += c))
         res.on('end', () => {
+          clearTimeout(timer)
           let json = null
           try { json = JSON.parse(data) } catch (_) {}
-          resolve({ status: res.statusCode, headers: res.headers, json, text: data })
+          done({ status: res.statusCode, headers: res.headers, json, text: data })
         })
       }
     )
-    req.on('error', () => resolve(null))
-    req.setTimeout(PROXY_TIMEOUT_MS, () => { try { req.destroy() } catch (_) {} resolve(null) })
+    const timer = setTimeout(() => {
+      try { req.destroy() } catch (_) {}
+      done(null)
+    }, timeoutMs || PROXY_TIMEOUT_MS)
+    if (timer.unref) timer.unref()
+    req.on('error', () => { clearTimeout(timer); done(null) })
     if (body != null) req.write(typeof body === 'string' ? body : JSON.stringify(body))
     req.end()
   })
@@ -1392,8 +1400,10 @@ async function loginRemoteDesktop() {
 
 // 探测远端是否为桌面版服务（暴露 /desktop/info）。
 // 结果写入 remoteCapable / remoteCapableAuthError / cachedRemoteCookie 并推送到渲染层。
-// 判定：登录成功 + /desktop/info 返回 {desktop:true} → 可远程安装；
-// 登录 404（无 /_auth/login）→ 裸 harness；登录 401 → 桌面版但密码错。
+// 判定流程（避免把"密码错误"误判为"裸服务"）：
+//   1) 未带 cookie 探测 /desktop/info：桌面 lan 服务会返回 401 {error:'unauthorized'}；
+//      裸 harness 返回 404/SPA 或 JSON 无该标记 → 判定为不可远程安装。
+//   2) 确认是桌面服务后，再 /_auth/login 拿会话 cookie；无 cookie 视为密码错误。
 async function detectRemoteCapability() {
   if (config.mode !== 'remote') {
     remoteCapable = false
@@ -1401,19 +1411,27 @@ async function detectRemoteCapability() {
     cachedRemoteCookie = ''
     return
   }
+  const probe = await remoteRequest('GET', '/desktop/info', { timeoutMs: 5000 })
+  const isDesktop = !!(probe && probe.status === 401 && probe.json && probe.json.error === 'unauthorized')
+  if (!isDesktop) {
+    remoteCapable = false
+    remoteCapableAuthError = false
+    cachedRemoteCookie = ''
+    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: false })
+    return
+  }
   const login = await loginRemoteDesktop()
   if (!login.ok) {
     remoteCapable = false
-    remoteCapableAuthError = !!login.authFail
+    remoteCapableAuthError = true
     cachedRemoteCookie = ''
-    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: !!login.authFail })
+    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: true })
     return
   }
   cachedRemoteCookie = login.cookie
-  const info = await remoteRequest('GET', '/desktop/info', { cookie: cachedRemoteCookie })
-  remoteCapable = !!(info && info.json && info.json.desktop === true)
+  remoteCapable = true
   remoteCapableAuthError = false
-  sendStatus({ mode: 'remote', remoteCapable, remoteCapableAuthError: false })
+  sendStatus({ mode: 'remote', remoteCapable: true, remoteCapableAuthError: false })
 }
 
 // 桌面 lan 服务专属端点（需登录）：供 remote 模式客户端远程安装插件。
@@ -1427,7 +1445,14 @@ async function handleDesktopApi(req, res) {
   }
   if (req.method === 'POST' && url === '/desktop/plugin-install') {
     let body = ''
-    req.on('data', (c) => (body += c))
+    req.on('data', (c) => {
+      body += c
+      if (body.length > 8192) {
+        res.writeHead(413)
+        res.end(JSON.stringify({ ok: false, log: '请求体过大' }))
+        req.destroy()
+      }
+    })
     req.on('end', async () => {
       let pkg = '', action = 'add'
       try { const o = JSON.parse(body); pkg = String(o.pkg || ''); action = o.action === 'remove' ? 'remove' : 'add' } catch (_) {}
@@ -2169,7 +2194,7 @@ function registerIpc() {
       if (!remoteCapable) {
         return { ok: false, log: '远端不是桌面版服务，无法远程安装。请在该服务端执行 `dsh plugin --profile web add ' + String(pkg) + '`' + (remoteCapableAuthError ? '（远端密码错误）' : '') }
       }
-      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: JSON.stringify({ pkg: String(pkg), action: 'add' }) })
+      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: { pkg: String(pkg), action: 'add' } })
       if (!r) return { ok: false, log: '无法连接远端桌面服务' }
       if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
       return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
@@ -2182,7 +2207,7 @@ function registerIpc() {
       if (!remoteCapable) {
         return { ok: false, log: '远端不是桌面版服务，无法远程卸载。请在该服务端执行 `dsh plugin --profile web remove ' + String(pkg) + '`' + (remoteCapableAuthError ? '（远端密码错误）' : '') }
       }
-      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: JSON.stringify({ pkg: String(pkg), action: 'remove' }) })
+      const r = await remoteRequest('POST', '/desktop/plugin-install', { cookie: cachedRemoteCookie, body: { pkg: String(pkg), action: 'remove' } })
       if (!r) return { ok: false, log: '无法连接远端桌面服务' }
       if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
       return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
