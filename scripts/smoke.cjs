@@ -61,16 +61,19 @@ function staticChecks() {
   try { check('package.json JSON 合法', true); fs.existsSync(path.join(ROOT, 'renderer/index.html')) && check('renderer 文件齐全', true) } catch (e) { check('package.json JSON 合法', false, e.message) }
 }
 
-// ---------- 插件市场解析检查（离线，喂样本文件） ----------
+// ---------- 插件市场解析检查（离线，喂样本文件，走声明式引擎） ----------
 function marketChecks() {
   let market = null
   try { market = require(path.join(ROOT, 'scripts', 'market.js')) } catch (e) { check('require market.js', false, e.message); return }
   check('require market.js', true)
+  check('内置预设为完整描述符', market.DEFAULT_MARKET_SOURCES.every((s) => s.format && s.url && s.fields))
   const samplesDir = '/tmp/mkt'
+  const dshSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'dshmarket')
+  const awSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'awesome')
   // dsh.market 标准 JSON
   const pmFile = path.join(samplesDir, 'plugins.json')
   if (fs.existsSync(pmFile)) {
-    const list = market.normalizeDshMarket(fs.readFileSync(pmFile, 'utf8'))
+    const list = market.parseJsonSource(dshSrc, fs.readFileSync(pmFile, 'utf8'))
     check('dsh.market 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
     check('dsh.market 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
   } else {
@@ -79,7 +82,7 @@ function marketChecks() {
   // awesome HTML data-cmd
   const awFile = path.join(samplesDir, 'awesome.html')
   if (fs.existsSync(awFile)) {
-    const list = market.normalizeAwesome(fs.readFileSync(awFile, 'utf8'))
+    const list = market.parseHtmlSource(awSrc, fs.readFileSync(awFile, 'utf8'))
     check('awesome 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
     check('awesome 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
   } else {

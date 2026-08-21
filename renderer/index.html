@@ -273,7 +273,9 @@
             <input id="marketName" type="text" placeholder="名称（可选）" />
             <input id="marketUrl" type="text" placeholder="市场源地址 URL" />
             <button type="button" class="btn" id="addMarketSrc">添加源</button>
+            <button type="button" class="btn ghost" id="toggleMarketJson">高级 JSON</button>
           </div>
+          <textarea id="marketJson" class="hidden" style="width:100%;margin-top:8px;min-height:120px;background:#0a0d1a;border:1px solid #2a3050;border-radius:8px;color:#cdd3ea;font-size:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder='高级：粘贴完整源描述符 JSON，例如 { "name":"我的市场", "url":"https://...", "format":"json", "jsonPath":"plugins", "fields":{ "pkg":"name", "name":"name" } }'></textarea>
           <div class="plugin-toolbar">
             <select id="marketActive" style="flex:0 0 200px"></select>
             <button type="button" class="btn ghost" id="marketRefresh">浏览 / 刷新</button>
@@ -623,19 +625,40 @@
       }
       sel.value = marketActiveId
     }
+    $('toggleMarketJson').addEventListener('click', () => {
+      const ta = $('marketJson')
+      ta.classList.toggle('hidden')
+      $('toggleMarketJson').textContent = ta.classList.contains('hidden') ? '高级 JSON' : '收起 JSON'
+    })
     $('addMarketSrc').addEventListener('click', async () => {
-      const type = $('marketType').value
-      const url = $('marketUrl').value.trim()
-      if (!url) return
-      const name = $('marketName').value.trim() || url
-      const src = { id: 'src-' + Date.now(), name, type, url }
+      const jsonText = $('marketJson').value.trim()
+      let src
+      if (jsonText) {
+        try {
+          const parsed = JSON.parse(jsonText)
+          if (!parsed.url) throw new Error('描述符缺少 url')
+          src = { id: parsed.id || 'src-' + Date.now(), name: parsed.name || parsed.url, type: parsed.type || 'catalog', url: parsed.url, format: parsed.format, jsonPath: parsed.jsonPath, entryRegex: parsed.entryRegex, fields: parsed.fields }
+        } catch (e) {
+          showMarketLog('描述符 JSON 解析失败：' + e.message, 'err')
+          return
+        }
+      } else {
+        const type = $('marketType').value
+        const url = $('marketUrl').value.trim()
+        if (!url) return
+        const name = $('marketName').value.trim() || url
+        src = { id: 'src-' + Date.now(), name, type, url }
+      }
       marketSources = [...marketSources, src]
       if (!marketActiveId) marketActiveId = src.id
       await window.dshDesktop.saveMarketSources(marketSources)
       $('marketName').value = ''
       $('marketUrl').value = ''
+      $('marketJson').value = ''
       renderMarketSources()
       renderMarketActive()
+      showMarketLog('已添加市场源：' + src.name, 'ok')
+      setTimeout(hideMarketLog, 2000)
     })
     $('marketActive').addEventListener('change', (e) => {
       marketActiveId = e.target.value
