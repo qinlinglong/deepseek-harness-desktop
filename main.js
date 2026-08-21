@@ -1417,7 +1417,7 @@ async function detectRemoteCapability() {
     remoteCapable = false
     remoteCapableAuthError = false
     cachedRemoteCookie = ''
-    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: false })
+    sendStatus({ ...lastStatus, remoteCapable: false, remoteCapableAuthError: false })
     return
   }
   const login = await loginRemoteDesktop()
@@ -1425,13 +1425,13 @@ async function detectRemoteCapability() {
     remoteCapable = false
     remoteCapableAuthError = true
     cachedRemoteCookie = ''
-    sendStatus({ mode: 'remote', remoteCapable: false, remoteCapableAuthError: true })
+    sendStatus({ ...lastStatus, remoteCapable: false, remoteCapableAuthError: true })
     return
   }
   cachedRemoteCookie = login.cookie
   remoteCapable = true
   remoteCapableAuthError = false
-  sendStatus({ mode: 'remote', remoteCapable: true, remoteCapableAuthError: false })
+  sendStatus({ ...lastStatus, remoteCapable: true, remoteCapableAuthError: false })
 }
 
 // 桌面 lan 服务专属端点（需登录）：供 remote 模式客户端远程安装插件。
