@@ -1215,10 +1215,15 @@ function restoreWindow() {
   }
   if (!mainWindow || mainWindow.isDestroyed()) return
 
-  // 窗口已存在：恢复原样——只 show+focus，不刷新不跳转。
-  // 关键：不能再 loadURL(currentWebUrl())，否则会把 dsh harness 界面内的
-  // 设置页/任意子路由刷回根路径（最小化后恢复丢失用户所在页面）。
-  if (hadWindow) return
+  // 窗口已存在：恢复原样。仅在窗口停留在启动/设置页(index.html)时跳回主界面
+  //（closeSettingsView 已把页面切到 splash，若不跳转会永久停在"就绪，正在打开界面…"）；
+  // 若已在 harness 页面则保持原状，不刷新不跳转（避免弄丢用户所在子页）。
+  if (hadWindow) {
+    try {
+      if (mainWindow.webContents.getURL().includes('index.html')) backToMainUI()
+    } catch (_) {}
+    return
+  }
 
   // 新建窗口（窗口此前被关闭）：loadFile(index.html) 异步加载中，getURL 为空。
   // 等 index.html 加载完成后，若关闭前在设置页则保持设置页，否则跳转到主界面。

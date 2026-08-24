@@ -85,6 +85,15 @@
     .settings.visible { display: block; }
     .settings h2 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
     .settings .desc { font-size: 12px; color: #8a93b5; margin-bottom: 22px; }
+    /* 设置分组（分类折叠） */
+    .cfg-group { border: 1px solid #242c4d; border-radius: 10px; background: #0e1226; margin-bottom: 14px; overflow: hidden; }
+    .cfg-group-h { display: flex; justify-content: space-between; align-items: center; padding: 11px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #e6e9f5; user-select: none; }
+    .cfg-group-h:hover { background: rgba(77, 107, 254, .08); }
+    .cfg-group-h .gdesc { font-size: 11px; color: #6f7ba3; font-weight: 400; margin-left: 8px; }
+    .cfg-group-h .chev { color: #6f7ba3; font-size: 12px; transition: transform .15s; }
+    .cfg-group-body { padding: 2px 14px 14px; }
+    .cfg-group.collapsed .cfg-group-body { display: none; }
+    .cfg-group.collapsed .chev { transform: rotate(-90deg); }
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 7px; color: #cdd3ea; }
     .field input, .field select {
@@ -167,6 +176,13 @@
     .market .mlog.visible { display: block; }
     .market .mlog.ok { color: #6ee7b7; }
     .market .mlog.err { color: #ff8a8a; }
+    /* 插件详情弹层 */
+    .pm-desc { font-size: 12px; color: #9aa3c8; margin: 10px 0; line-height: 1.7; }
+    .pm-legend { font-size: 11px; color: #6f7ba3; margin: 10px 0 4px; }
+    .pm-cmd { display: block; background: #0a0d1a; border: 1px solid #2a3050; border-radius: 8px;
+      padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+      color: #7dd3fc; user-select: text; word-break: break-all; line-height: 1.5; }
+    .pm-pkg { font-size: 11px; color: #6f7ba3; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -193,6 +209,9 @@
     <h2>设置</h2>
     <div class="desc">选择运行模式，保存后立即生效</div>
     <form id="settingsForm">
+      <div class="cfg-group">
+        <div class="cfg-group-h"><span>连接方式<span class="gdesc">本机 / 局域网服务端 / 局域网连接</span></span><span class="chev">▾</span></div>
+        <div class="cfg-group-body">
       <div class="field">
         <label>运行模式</label>
         <select id="cfgMode">
@@ -241,7 +260,12 @@
         </div>
         <div class="hint">连接本机或其他设备上的服务端；若设置了密码，首次访问需在页面中输入</div>
       </div>
+        </div>
+      </div>
 
+      <div class="cfg-group">
+        <div class="cfg-group-h"><span>外观<span class="gdesc">图标与悬浮球</span></span><span class="chev">▾</span></div>
+        <div class="cfg-group-body">
       <div class="field">
         <label>应用图标</label>
         <div class="icon-picker" id="iconPicker"></div>
@@ -252,7 +276,12 @@
         <label class="check"><input type="checkbox" id="cfgShowFloat" /> 启用桌面悬浮球</label>
         <div class="hint">桌面角落的圆形小图标，点击打开迷你聊天窗口，可拖到任意位置</div>
       </div>
+        </div>
+      </div>
 
+      <div class="cfg-group">
+        <div class="cfg-group-h"><span>快捷指令<span class="gdesc">提词器：一键填入提问模板</span></span><span class="chev">▾</span></div>
+        <div class="cfg-group-body">
       <div class="field">
         <label>快捷指令 / 提词器</label>
         <div class="hint">一组常用提问模板，一键填入迷你聊天输入框；也可在迷你窗顶部的 ⚡ 按钮中快速调用</div>
@@ -263,7 +292,12 @@
           <button type="button" class="btn" id="addPrompt">添加</button>
         </div>
       </div>
+        </div>
+      </div>
 
+      <div class="cfg-group">
+        <div class="cfg-group-h"><span>插件市场<span class="gdesc">浏览 / 一键安装 dsh 插件</span></span><span class="chev">▾</span></div>
+        <div class="cfg-group-body">
       <div class="field">
         <label>插件市场</label>
         <div class="hint">配置第三方市场源（可自由更换），浏览并一键安装 dsh 插件到本机。安装后需重启服务生效。</div>
@@ -295,6 +329,8 @@
           <div class="mlog" id="marketLog"></div>
         </div>
       </div>
+        </div>
+      </div>
 
       <div class="actions">
         <button type="button" class="btn ghost" id="btnBack">返回</button>
@@ -316,6 +352,23 @@
       <div class="actions">
         <button type="button" class="btn ghost" id="lanModalClose">关闭</button>
         <button type="button" class="btn" id="lanModalOpen">在浏览器打开</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 插件详情弹层：查看安装命令 + 复制 + 直接安装 -->
+  <div class="modal-overlay hidden" id="pluginModal">
+    <div class="modal" style="width:440px">
+      <h3 id="pmName" style="margin-bottom:2px"></h3>
+      <div class="modal-sub" id="pmMeta"></div>
+      <div class="pm-desc" id="pmDesc"></div>
+      <div class="pm-legend">安装命令</div>
+      <code class="pm-cmd" id="pmCmd"></code>
+      <div class="pm-pkg" id="pmPkg"></div>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="pmCopy">复制命令</button>
+        <button type="button" class="btn ghost danger" id="pmClose">关闭</button>
+        <button type="button" class="btn" id="pmInstall">安装</button>
       </div>
     </div>
   </div>
@@ -365,6 +418,14 @@
 
     $('settingsBtn').addEventListener('click', () => showSettings())
     $('openSettings').addEventListener('click', () => showSettings())
+    // 设置分类折叠
+    document.querySelectorAll('.cfg-group-h').forEach((h) => {
+      h.addEventListener('click', () => {
+        const g = h.closest('.cfg-group')
+        const collapsed = g.classList.toggle('collapsed')
+        h.querySelector('.chev').textContent = collapsed ? '▸' : '▾'
+      })
+    })
     $('btnBack').addEventListener('click', () => window.dshDesktop.back())
     $('btnQuit').addEventListener('click', () => window.dshDesktop.quit())
     $('retry2').addEventListener('click', () => {
@@ -474,6 +535,7 @@
         body.textContent = p.content
         body.title = p.content
         const del = document.createElement('button')
+        del.type = 'button'
         del.className = 'pdel'
         del.textContent = '✕'
         del.title = '删除'
@@ -617,6 +679,7 @@
         type.className = 'stype'
         type.textContent = s.type
         const del = document.createElement('button')
+        del.type = 'button'
         del.className = 'sdel'
         del.textContent = '✕'
         del.title = '删除源'
@@ -628,6 +691,7 @@
           renderMarketActive()
         })
         const edit = document.createElement('button')
+        edit.type = 'button'
         edit.className = 'sdel'
         edit.textContent = '✎'
         edit.title = '编辑 URL'
@@ -727,6 +791,7 @@
             ver.className = 'iver'
             ver.textContent = p.version
             const del = document.createElement('button')
+        del.type = 'button'
             del.className = 'idel'
             del.textContent = '卸载'
             del.addEventListener('click', async () => {
@@ -756,6 +821,76 @@
       }
     }
     $('refreshInstalled').addEventListener('click', refreshInstalled)
+
+    // 插件详情弹层：展示安装命令，支持复制命令 / 直接安装
+    let pmPlugin = null
+    function openPluginDetail(p) {
+      pmPlugin = p
+      const installed = installedSet.has(p.pkg) || installedSet.has(p.name)
+      $('pmName').textContent = p.name
+      $('pmMeta').textContent = [p.version ? 'v' + p.version : '', p.category || '', '源码包：' + p.pkg].filter(Boolean).join(' · ')
+      $('pmDesc').textContent = p.description || '（无描述）'
+      $('pmCmd').textContent = 'dsh plugin --profile web add ' + p.pkg
+      $('pmPkg').textContent = p.pkg
+      const installBtn = $('pmInstall')
+      installBtn.style.display = 'inline-block'
+      installBtn.disabled = false
+      installBtn.title = ''
+      if (installed) {
+        installBtn.textContent = '已安装'
+        installBtn.disabled = true
+      } else if (currentMode === 'remote' && !remoteCapable) {
+        installBtn.textContent = '远端不可装'
+        installBtn.disabled = true
+        installBtn.title = remoteCapableAuthError
+          ? '远端密码错误，请在设置填写正确密码'
+          : '远端不是桌面版服务，请到该服务端执行此命令'
+      } else {
+        installBtn.textContent = '安装'
+      }
+      $('pluginModal').classList.remove('hidden')
+    }
+    $('pmClose').addEventListener('click', () => $('pluginModal').classList.add('hidden'))
+    $('pluginModal').addEventListener('click', (e) => {
+      if (e.target === $('pluginModal')) $('pluginModal').classList.add('hidden')
+    })
+    $('pmCopy').addEventListener('click', async () => {
+      const text = $('pmCmd').textContent
+      try {
+        await navigator.clipboard.writeText(text)
+        showMarketLog('安装命令已复制', 'ok')
+        setTimeout(hideMarketLog, 2000)
+        return
+      } catch (_) {}
+      // file:// 上下文剪贴板不可用时回退
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        ta.remove()
+        showMarketLog('安装命令已复制', 'ok')
+        setTimeout(hideMarketLog, 2000)
+      } catch (_) {
+        showMarketLog('复制失败，请手动选择命令', 'err')
+      }
+    })
+    $('pmInstall').addEventListener('click', async () => {
+      if (!pmPlugin) return
+      const btn = $('pmInstall')
+      btn.disabled = true
+      btn.textContent = '安装中…'
+      showMarketLog('正在安装 ' + pmPlugin.pkg + ' …')
+      const r = await window.dshDesktop.pluginInstall(pmPlugin.pkg)
+      showMarketLog(r.log || (r.ok ? '安装完成，重启服务后生效' : '安装失败'), r.ok ? 'ok' : 'err')
+      await refreshInstalled()
+      btn.disabled = false
+      btn.textContent = '已安装'
+      setTimeout(hideMarketLog, 2500)
+    })
 
     function renderMarketPlugins() {
       const q = ($('marketSearch').value || '').trim().toLowerCase()
@@ -796,6 +931,13 @@
         pkg.textContent = p.pkg
         pkg.title = p.pkg
         actions.appendChild(pkg)
+        const infoBtn = document.createElement('button')
+        infoBtn.type = 'button'
+        infoBtn.className = 'btn ghost'
+        infoBtn.textContent = '命令'
+        infoBtn.title = '查看安装命令 / 复制 / 安装'
+        infoBtn.addEventListener('click', () => openPluginDetail(p))
+        actions.appendChild(infoBtn)
         if (installedSet.has(p.pkg) || installedSet.has(p.name)) {
           const tag = document.createElement('span')
           tag.className = 'pc-installed'
@@ -803,6 +945,7 @@
           actions.appendChild(tag)
         } else {
           const btn = document.createElement('button')
+        btn.type = 'button'
           btn.className = 'btn'
           btn.textContent = '安装'
           // remote 模式且远端非桌面版服务：禁用远程安装（裸 harness 无安装接口）
