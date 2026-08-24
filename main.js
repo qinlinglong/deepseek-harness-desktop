@@ -1508,6 +1508,7 @@ function buildAppMenu() {
         { role: 'about' },
         { type: 'separator' },
         { label: '设置…', accelerator: 'CommandOrControl+,', click: () => showSettings() },
+    { label: '插件市场', click: () => showSettings('pane:market') },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -1551,6 +1552,7 @@ function createTray() {
       },
     },
     { label: '设置…', click: () => showSettings() },
+    { label: '插件市场', click: () => showSettings('pane:market') },
     { type: 'separator' },
     { label: '在浏览器打开', click: () => openBrowserUrl() },
     {

@@ -71,8 +71,9 @@ function staticChecks() {
   check('native-float 导出 revertNativeFloatTop', nativeFloatSrc.includes('function revertNativeFloatTop') && nativeFloatSrc.includes('revertNativeFloatTop'))
   check('main 取消置顶撤销原生层级', mainSrc.includes('revertNativeFloatTop'))
   check('悬浮球菜单含隐藏项', mainSrc.includes("label: '隐藏悬浮球'"))
-  // 设置页分组 / 插件详情弹层 / 内置表单按钮 type 防护
-  check('设置页含分类分组', idxHtml.includes('cfg-group-h') && idxHtml.includes('连接方式'))
+  // 设置页二级菜单 / 插件详情弹层 / 内置表单按钮 type 防护
+  check('设置页二级菜单导航', idxHtml.includes('settings-nav') && idxHtml.includes('cfg-pane') && idxHtml.includes('data-nav="market"'))
+  check('应用菜单含插件市场直达', mainSrc.includes("showSettings('pane:market')"))
   check('插件详情弹层存在', idxHtml.includes('pluginModal') && idxHtml.includes('pmCmd') && idxHtml.includes('pmInstall'))
   check('DOM 按钮均带 type=button 防误提交', (idxHtml.match(/createElement\('button'\)/g) || []).length === (idxHtml.match(/\.type = 'button'/g) || []).length)
   // 防止 market 方法被裸调用（如 normalizeMarketSources 忘写 market. 前缀 → 启动时 ReferenceError）
