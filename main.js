@@ -130,6 +130,9 @@ let lastDshErr = '' // 最近一次 dsh 服务进程的 stderr（用于启动失
 let remoteCapable = false // 远端是否为桌面版服务（暴露 /desktop/* 端点）
 let remoteCapableAuthError = false // 远端是桌面版但密码错误
 let cachedRemoteCookie = '' // 远端 /_auth/login 拿到的会话 cookie
+// 插件市场浏览结果缓存：大源（如 dsh.market 12MB/4900+ 插件）避免每次进入重复下载
+const MARKET_CACHE_TTL_MS = 10 * 60 * 1000
+const marketCache = new Map() // sourceId -> { ts, list }
 let config = { ...DEFAULT_CONFIG }
 
 if (!app.requestSingleInstanceLock()) {
@@ -2206,12 +2209,18 @@ function registerIpc() {
   ipcMain.handle('dsh:save-market-sources', (_e, arr) => {
     config.marketSources = market.normalizeMarketSources(arr)
     saveConfigToDisk()
+    // 源被修改后失效其缓存
+    marketCache.clear()
     return config.marketSources
   })
   ipcMain.handle('dsh:market-browse', async (_e, sourceId) => {
     const s = config.marketSources.find((x) => x.id === sourceId)
     if (!s) throw new Error('市场源不存在')
-    return market.browseMarket(s)
+    const cached = marketCache.get(sourceId)
+    if (cached && Date.now() - cached.ts < MARKET_CACHE_TTL_MS) return cached.list
+    const list = await market.browseMarket(s)
+    marketCache.set(sourceId, { ts: Date.now(), list })
+    return list
   })
   ipcMain.handle('dsh:plugin-install', async (_e, pkg) => {
     if (config.mode === 'remote') {

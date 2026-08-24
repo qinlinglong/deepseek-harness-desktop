@@ -985,6 +985,7 @@
       if (!src) { showMarketLog('请先选择或添加市场源', 'err'); return }
       $('marketRefresh').disabled = true
       $('marketRefresh').textContent = '加载中…'
+      $('marketPlugins').innerHTML = '<div class="hint" style="margin:0">正在加载插件列表…（大市场源首次需数秒）</div>'
       showMarketLog('正在从 ' + src.url + ' 加载…')
       try {
         marketPlugins = await window.dshDesktop.marketBrowse(marketActiveId)
