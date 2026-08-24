@@ -154,8 +154,10 @@
     .market .src-item.active { border-color: #4d6bfe; box-shadow: 0 0 0 2px rgba(77,107,254,.35); }
     .market .add-src input, .market .add-src select { flex: 1; width: auto; }
     .market .add-src button { margin-top: 0; white-space: nowrap; }
-    .plugin-toolbar { display: flex; gap: 8px; margin: 10px 0; }
-    .plugin-toolbar input[type="search"] { flex: 1; }
+    .plugin-toolbar { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; align-items: center; }
+    .plugin-toolbar input[type="search"] { flex: 1; min-width: 140px; }
+    .plugin-toolbar select { padding: 7px 8px; border-radius: 8px; border: 1px solid #2a3050; background: #0d1122; color: #cdd3ea; font-size: 12px; outline: none; }
+    .plugin-toolbar .fg-label { font-size: 11px; color: #6f7ba3; }
     .plugin-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 4px; }
     .plugin-card { padding: 12px 14px; background: #0d1122; border: 1px solid #2a3050; border-radius: 10px; cursor: pointer; }
     .plugin-card:hover { border-color: #4d6bfe; }
@@ -316,6 +318,35 @@
             <select id="marketActive" style="flex:0 0 200px"></select>
             <button type="button" class="btn ghost" id="marketRefresh">浏览 / 刷新</button>
             <input id="marketSearch" type="search" placeholder="搜索插件名 / 描述…" />
+          </div>
+          <div class="plugin-toolbar">
+            <span class="fg-label">排序</span>
+            <select id="mktSort">
+              <option value="score">实用分</option>
+              <option value="stars">热度</option>
+              <option value="newest">最新</option>
+            </select>
+            <span class="fg-label">视图</span>
+            <select id="mktView">
+              <option value="all">全部插件</option>
+              <option value="elite">高分精选 ≥80</option>
+              <option value="friendly">新手友好</option>
+              <option value="fresh">最新上架</option>
+            </select>
+            <span class="fg-label">星级</span>
+            <select id="mktStars">
+              <option value="">全部</option>
+              <option value="lt10">新插件 &lt;10★</option>
+              <option value="10-50">10-50★</option>
+              <option value="50">50+★</option>
+            </select>
+            <span class="fg-label">配置</span>
+            <select id="mktCfg">
+              <option value="">全部</option>
+              <option value="ready">开箱即用</option>
+              <option value="config">需配置</option>
+            </select>
+            <span class="hint" id="mktCount" style="margin-left:auto;margin-top:0"></span>
           </div>
           <div class="plugin-list" id="marketPlugins"></div>
           <div class="market">
@@ -769,6 +800,8 @@
     $('marketActive').addEventListener('change', (e) => {
       marketActiveId = e.target.value
       marketSources.forEach((s) => s.id === marketActiveId && (marketActiveId = s.id))
+      // 切换市场源自动加载新源列表（保留搜索词与排序筛选条件）
+      $('marketRefresh').click()
     })
 
     async function refreshInstalled() {
@@ -893,10 +926,42 @@
 
     function renderMarketPlugins() {
       const q = ($('marketSearch').value || '').trim().toLowerCase()
+      const sortKey = $('mktSort').value
+      const view = $('mktView').value
+      const starsKey = $('mktStars').value
+      const cfgKey = $('mktCfg').value
       const box = $('marketPlugins')
       box.innerHTML = ''
-      const list = marketPlugins.filter((p) =>
-        !q || p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q))
+      // 排序/筛选与 dsh.market 网站前端逻辑对齐
+      let list = marketPlugins.slice()
+      if (view === 'elite') list = list.filter((p) => (p.score || 0) >= 80)
+      else if (view === 'friendly') list = list.filter((p) => (p.score || 0) >= 60 && !p.needsConfig)
+      else if (view === 'fresh') list = [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 24)
+      if (starsKey === 'lt10') list = list.filter((p) => (p.stars || 0) < 10)
+      else if (starsKey === '10-50') list = list.filter((p) => (p.stars || 0) >= 10 && (p.stars || 0) < 50)
+      else if (starsKey === '50') list = list.filter((p) => (p.stars || 0) >= 50)
+      if (cfgKey === 'ready') list = list.filter((p) => !p.needsConfig)
+      else if (cfgKey === 'config') list = list.filter((p) => !!p.needsConfig)
+      // 搜索排名：全名精确 0 < 前缀 1 < 其它 2，平局按实用分降序
+      if (q) {
+        const rank = (name) => {
+          const n = String(name || '').toLowerCase()
+          if (n === q) return 0
+          if (n.startsWith(q)) return 1
+          return 2
+        }
+        list = list
+          .filter((p) =>
+            rank(p.name) !== 2 ||
+            (p.description || '').toLowerCase().includes(q) ||
+            (p.category || '').toLowerCase().includes(q) ||
+            (p.tagsArr || []).some((t) => t.toLowerCase().includes(q)))
+          .sort((a, b) => rank(a.name) - rank(b.name) || (b.score || 0) - (a.score || 0))
+      }
+      if (sortKey === 'score') list.sort((a, b) => (b.score || 0) - (a.score || 0))
+      else if (sortKey === 'stars') list.sort((a, b) => (b.stars || 0) - (a.stars || 0))
+      else if (sortKey === 'newest') list.sort((a, b) => String(b.pushedAt || '').localeCompare(String(a.pushedAt || '')))
+      $('mktCount').textContent = list.length ? '共 ' + list.length + ' 个插件' : ''
       if (!list.length) {
         box.innerHTML = '<div class="hint" style="margin:0">该源暂无匹配插件，点"浏览 / 刷新"加载</div>'
         return
@@ -980,6 +1045,9 @@
       }
     }
     $('marketSearch').addEventListener('input', renderMarketPlugins)
+    ;['mktSort', 'mktView', 'mktStars', 'mktCfg'].forEach((id) => {
+      $(id).addEventListener('change', renderMarketPlugins)
+    })
     $('marketRefresh').addEventListener('click', async () => {
       const src = marketSources.find((s) => s.id === marketActiveId)
       if (!src) { showMarketLog('请先选择或添加市场源', 'err'); return }

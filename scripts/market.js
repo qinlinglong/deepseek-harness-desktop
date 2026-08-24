@@ -37,6 +37,13 @@ const DEFAULT_MARKET_SOURCES = [
       version: 'version',
       category: { json: 'tags', join: ', ', limit: 3 },
       homepage: 'homepage',
+      // 扩展字段：用于应用内排序/筛选，对齐 dsh.market 网站前端逻辑
+      score: 'score.total',
+      stars: 'stars',
+      needsConfig: 'install.needsConfig',
+      pushedAt: 'pushedAt',
+      createdAt: 'createdAt',
+      tags: 'tags',
     },
   },
   {
@@ -200,7 +207,13 @@ function buildCommon(out, source) {
   if (!out.pkg && out.name) out.pkg = out.name
   if (!out.pkg) return null
   if (!out.name) out.name = out.pkg
-  return { id: out.id || out.pkg, name: out.name, description: out.description || '', version: out.version || '', category: out.category || '', homepage: out.homepage || '', pkg: out.pkg, source: source.name || '' }
+  const built = { id: out.id || out.pkg, name: out.name, description: out.description || '', version: out.version || '', category: out.category || '', homepage: out.homepage || '', pkg: out.pkg, source: source.name || '' }
+  // 透传扩展字段（对齐市场网站排序/筛选逻辑）
+  for (const k of ['score', 'stars', 'needsConfig', 'pushedAt', 'createdAt']) {
+    if (out[k] != null && out[k] !== '') built[k] = out[k]
+  }
+  if (out.tagsArr) built.tagsArr = out.tagsArr
+  return built
 }
 
 function parseJsonSource(source, body) {
@@ -218,6 +231,16 @@ function parseJsonSource(source, body) {
       const out = { id: String(entry.id || entry.name || i) }
       for (const key of ['name', 'description', 'version', 'category', 'homepage', 'pkg']) {
         out[key] = fields[key] != null ? resolveJsonField(fields[key], entry) : (entry[key] != null ? String(entry[key]) : '')
+      }
+      // 扩展字段捕获（对齐市场网站排序/筛选：score/stars/needsConfig/时间/完整 tags）
+      if (fields.score != null) out.score = Number(String(resolveJsonField(fields.score, entry)) || 0)
+      if (fields.stars != null) out.stars = Number(String(resolveJsonField(fields.stars, entry)) || 0)
+      if (fields.needsConfig != null) out.needsConfig = String(resolveJsonField(fields.needsConfig, entry) || '') === 'true'
+      if (fields.pushedAt != null) out.pushedAt = String(resolveJsonField(fields.pushedAt, entry) || '')
+      if (fields.createdAt != null) out.createdAt = String(resolveJsonField(fields.createdAt, entry) || '')
+      if (fields.tags != null && !out.tagsArr) {
+        const t = resolveJsonField(fields.tags, entry)
+        out.tagsArr = Array.isArray(t) ? t.map(String) : String(t || '').split(',').map((x) => x.trim()).filter(Boolean)
       }
       return buildCommon(out, source)
     })
