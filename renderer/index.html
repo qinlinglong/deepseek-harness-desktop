@@ -157,7 +157,8 @@
     .plugin-toolbar { display: flex; gap: 8px; margin: 10px 0; }
     .plugin-toolbar input[type="search"] { flex: 1; }
     .plugin-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 4px; }
-    .plugin-card { padding: 12px 14px; background: #0d1122; border: 1px solid #2a3050; border-radius: 10px; }
+    .plugin-card { padding: 12px 14px; background: #0d1122; border: 1px solid #2a3050; border-radius: 10px; cursor: pointer; }
+    .plugin-card:hover { border-color: #4d6bfe; }
     .plugin-card .pc-top { display: flex; align-items: center; gap: 8px; }
     .plugin-card .pc-name { font-size: 13px; font-weight: 600; color: #e6e9f5; }
     .plugin-card .pc-ver { font-size: 11px; color: #6f7ba3; }
@@ -360,7 +361,7 @@
       <div class="pm-desc" id="pmDesc"></div>
       <div class="pm-legend">安装命令</div>
       <code class="pm-cmd" id="pmCmd"></code>
-      <div class="pm-pkg" id="pmPkg"></div>
+      <div class="pm-pkg" id="pmPkg">从 npm 仓库安装（淘宝镜像源），无需本机 Node / pnpm</div>
       <div class="actions">
         <button type="button" class="btn" id="pmInstall">安装</button>
         <button type="button" class="btn ghost" id="pmCopy">复制命令</button>
@@ -903,6 +904,11 @@
       for (const p of list) {
         const card = document.createElement('div')
         card.className = 'plugin-card'
+        // 点击卡片进入详情（按钮除外）：搜索 → 看详情（含安装命令） → 点安装
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return
+          openPluginDetail(p)
+        })
         const top = document.createElement('div')
         top.className = 'pc-top'
         const name = document.createElement('span')
