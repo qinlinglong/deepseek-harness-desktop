@@ -627,8 +627,23 @@
           renderMarketSources()
           renderMarketActive()
         })
+        const edit = document.createElement('button')
+        edit.className = 'sdel'
+        edit.textContent = '✎'
+        edit.title = '编辑 URL'
+        edit.addEventListener('click', () => {
+          editingMarketSrcId = s.id
+          $('marketType').value = s.type || 'catalog'
+          $('marketName').value = s.name || ''
+          $('marketUrl').value = s.url || ''
+          $('marketJson').value = ''
+          $('addMarketSrc').textContent = '保存修改'
+          showMarketLog('正在编辑：' + s.name + '，改完点「保存修改」', 'ok')
+          setTimeout(hideMarketLog, 2500)
+        })
         row.appendChild(name)
         row.appendChild(type)
+        row.appendChild(edit)
         row.appendChild(del)
         box.appendChild(row)
       }
@@ -649,6 +664,7 @@
       ta.classList.toggle('hidden')
       $('toggleMarketJson').textContent = ta.classList.contains('hidden') ? '高级 JSON' : '收起 JSON'
     })
+    let editingMarketSrcId = '' // 正在编辑的市场源 id（空=新增模式）
     $('addMarketSrc').addEventListener('click', async () => {
       const jsonText = $('marketJson').value.trim()
       let src
@@ -656,7 +672,7 @@
         try {
           const parsed = JSON.parse(jsonText)
           if (!parsed.url) throw new Error('描述符缺少 url')
-          src = { id: parsed.id || 'src-' + Date.now(), name: parsed.name || parsed.url, type: parsed.type || 'catalog', url: parsed.url, format: parsed.format, jsonPath: parsed.jsonPath, entryRegex: parsed.entryRegex, fields: parsed.fields }
+          src = { id: editingMarketSrcId || parsed.id || 'src-' + Date.now(), name: parsed.name || parsed.url, type: parsed.type || 'catalog', url: parsed.url, format: parsed.format, jsonPath: parsed.jsonPath, entryRegex: parsed.entryRegex, fields: parsed.fields }
         } catch (e) {
           showMarketLog('描述符 JSON 解析失败：' + e.message, 'err')
           return
@@ -666,17 +682,25 @@
         const url = $('marketUrl').value.trim()
         if (!url) return
         const name = $('marketName').value.trim() || url
-        src = { id: 'src-' + Date.now(), name, type, url }
+        src = { id: editingMarketSrcId || 'src-' + Date.now(), name, type, url }
       }
-      marketSources = [...marketSources, src]
-      if (!marketActiveId) marketActiveId = src.id
+      if (editingMarketSrcId) {
+        // 编辑模式：按 id 覆盖原源，保持位置
+        marketSources = marketSources.map((x) => x.id === editingMarketSrcId ? src : x)
+        showMarketLog('已保存市场源：' + src.name, 'ok')
+      } else {
+        marketSources = [...marketSources, src]
+        if (!marketActiveId) marketActiveId = src.id
+        showMarketLog('已添加市场源：' + src.name, 'ok')
+      }
+      editingMarketSrcId = ''
+      $('addMarketSrc').textContent = '添加源'
       await window.dshDesktop.saveMarketSources(marketSources)
       $('marketName').value = ''
       $('marketUrl').value = ''
       $('marketJson').value = ''
       renderMarketSources()
       renderMarketActive()
-      showMarketLog('已添加市场源：' + src.name, 'ok')
       setTimeout(hideMarketLog, 2000)
     })
     $('marketActive').addEventListener('change', (e) => {
@@ -800,6 +824,7 @@
             await refreshInstalled()
           })
           actions.appendChild(btn)
+        }
         }
         card.appendChild(top)
         card.appendChild(desc)

@@ -74,6 +74,16 @@ function staticChecks() {
   // 防止 market 方法被裸调用（如 normalizeMarketSources 忘写 market. 前缀 → 启动时 ReferenceError）
   const bareMarketCall = /[^.\w](normalizeMarketSources|runDshPlugin|listInstalledPlugins|browseMarket|buildPnpmShims|pnpmEnv)\(/.test(mainSrc)
   check('main 中 market 方法均带 market. 前缀', !bareMarketCall)
+  // index.html 内联脚本语法检查（防括号不闭合导致整页 JS 失效、设置页打不开）
+  try {
+    const m = idxHtml.match(/<script>([\s\S]*)<\/script>/)
+    if (m) {
+      execFileSync(process.execPath, ['--check', '-'], { input: m[1], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+      check('renderer/index.html 内联脚本语法合法', true)
+    }
+  } catch (e) {
+    check('renderer/index.html 内联脚本语法合法', false, String(e && e.message))
+  }
 }
 
 // ---------- 插件市场解析检查（离线，喂样本文件，走声明式引擎） ----------

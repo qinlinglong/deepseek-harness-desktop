@@ -2013,7 +2013,10 @@ function reapplyMiniTop() {
       miniWin.setAlwaysOnTop(false)
       if (isMac) {
         try { miniWin.setVisibleOnAllWorkspaces(false) } catch (_) {}
-        if (nativeFloatTop) nativeFloatTop.revertNativeFloatTop(miniWin)
+        if (nativeFloatTop) {
+          nativeFloatTop.revertNativeFloatTop(miniWin)
+          clearAllSpacesSafely(miniWin)
+        }
       }
     }
   } catch (_) {}
@@ -2021,6 +2024,19 @@ function reapplyMiniTop() {
 
 // 迷你窗定位到悬浮球附近（豆包同款）：优先悬浮球上方，空间不足回退下方；
 // 水平右对齐悬浮球，超出屏幕则贴边。
+// 清除窗口的"跟随所有 Space"行为（取消置顶时调用）。
+// Electron 的 setVisibleOnAllWorkspaces(false) 对 panel 是异步生效的，
+// 完成后会回填 CanJoinAllSpaces（行为：取消置顶后仍跨桌面）。
+// 因此立即清一次 + 400ms 后再清一次，保证最终状态只留在当前桌面。
+function clearAllSpacesSafely(win) {
+  if (!win || win.isDestroyed() || !nativeFloatTop) return
+  nativeFloatTop.clearAllSpaces(win)
+  setTimeout(() => {
+    if (!win || win.isDestroyed()) return
+    nativeFloatTop.clearAllSpaces(win)
+  }, 400)
+}
+
 function positionMiniNearFloat() {
   if (!miniWin || miniWin.isDestroyed()) return
   if (!floatWin || floatWin.isDestroyed()) return

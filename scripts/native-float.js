@@ -30,8 +30,10 @@ const SCREEN_SAVER_LEVEL = 27
 let initialized = false
 let msg0 = null // objc_msgSend(void*, void*)
 let msg1 = null // objc_msgSend(void*, void*, uint64_t) -> void*
+let msgLong = null // objc_msgSend(void*, void*) -> long long（读属性）
 let selWindow = null
 let selSetCollectionBehavior = null
+let selCollectionBehavior = null
 let selSetLevel = null
 let selSetHidesOnDeactivate = null
 let selSetExcludedFromWindowsMenu = null
@@ -56,6 +58,8 @@ function init() {
 
     const libB = koffi.load('/usr/lib/libobjc.A.dylib')
     msg1 = libB.func('void * objc_msgSend(void *self, void *op, uint64_t v)')
+    // 读 long long 属性（collectionBehavior / level），arm64 上返回值在 rax，可用 long long 签名读取
+    msgLong = libB.func('long long objc_msgSend(void *self, void *op)')
 
     // 之前尝试用 object_setClass 把 NSWindow → NSPanel 升级，但 NSPanel
     // 比 NSWindow 多 ivar，反父子类化导致 SIGTRAP 崩溃。不安全，已移除。
@@ -64,6 +68,7 @@ function init() {
 
     selWindow = selReg('window')
     selSetCollectionBehavior = selReg('setCollectionBehavior:')
+    selCollectionBehavior = selReg('collectionBehavior')
     selSetLevel = selReg('setLevel:')
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
@@ -138,6 +143,31 @@ function revertNativeFloatTop(win) {
 }
 
 /**
+ * 清除 NSWindowCollectionBehaviorCanJoinAllSpaces（bit 0）：
+ * 取消"跟随所有 Space"，让窗口只在当前桌面显示（对齐豆包"取消置顶=普通窗口"）。
+ * 只清除该位、保留其它集合行为；重复调用幂等。
+ * @param {Electron.BrowserWindow} win
+ * @returns {boolean} 是否成功
+ */
+function clearAllSpaces(win) {
+  if (!win || win.isDestroyed()) return false
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow) return false
+    const cur = msgLong(nsWindow, selCollectionBehavior) || 0
+    const cleared = cur & ~NSWindowCollectionBehaviorCanJoinAllSpaces
+    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, cleared)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+/**
  * 强制系统光标为"手型"或"默认箭头"。
  * 必须在主进程主线程调用（objc_msgSend 限制）。箭头光标惰性初始化，
  * 需 NSApp 已存在（Electron 主进程总是满足，纯 node 进程会返回空）。
@@ -157,4 +187,4 @@ function setFloatCursor(isHand) {
   }
 }
 
-module.exports = { applyNativeFloatTop, revertNativeFloatTop, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
