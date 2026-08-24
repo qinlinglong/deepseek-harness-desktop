@@ -22,6 +22,21 @@ const http = require('http')
 const { spawn } = require('node:child_process')
 
 // ---------------- 内置预设（均为完整描述符，零代码即可解析） ----------------
+// 市场描述符协议（接入新市场只需按此声明，无需改解析代码）：
+// {
+//   id, name, type, url,
+//   format: 'json' | 'html',
+//   jsonPath: 'a[0].b'        // json 源条目所在的数组路径（留空=整份 JSON 为数组）
+//   entryRegex: '...'          // html 源条目正则（含捕获组）
+//   fields: {                  // 字段映射：标准字段 pkg/name/description/version/category/homepage
+//     pkg: ...,                //   扩展字段不限名，值可为：'a.b' 路径 | 数组(多候选) | {json,regex,group,join,limit,numeric,boolean,const}
+//     score: { json: 'score.total', numeric: true },
+//     stars: { json: 'stars', numeric: true },
+//     needsConfig: { json: 'install.needsConfig', boolean: true },
+//   },
+//   defaultSort: { field: 'score', dir: 'desc' }  // 可选：应用内默认排序（field 对应扩展字段名）
+// }
+// 特殊用法：html 源字段可用 'match:1' / 'attr:name' / 'const:x' / 'contextAttr:xx'
 const DEFAULT_MARKET_SOURCES = [
   {
     id: 'dshmarket',
@@ -30,6 +45,7 @@ const DEFAULT_MARKET_SOURCES = [
     format: 'json',
     url: 'https://dsh.market/plugins.json',
     jsonPath: 'plugins',
+    defaultSort: { field: 'score', dir: 'desc' }, // 对齐 dsh.market 网站默认「实用分降序」
     fields: {
       pkg: { json: ['install.commands[0]', 'install.command', 'name'], regex: 'add\\s+(\\S+)', group: 1 },
       name: 'name',
@@ -37,13 +53,13 @@ const DEFAULT_MARKET_SOURCES = [
       version: 'version',
       category: { json: 'tags', join: ', ', limit: 3 },
       homepage: 'homepage',
-      // 扩展字段：用于应用内排序/筛选，对齐 dsh.market 网站前端逻辑
-      score: 'score.total',
-      stars: 'stars',
-      needsConfig: 'install.needsConfig',
+      // 扩展字段（不透传 pkg 等标准字段名以外的都进 meta）：数值/布尔用显式类型标注
+      score: { json: 'score.total', numeric: true },
+      stars: { json: 'stars', numeric: true },
+      needsConfig: { json: 'install.needsConfig', boolean: true },
       pushedAt: 'pushedAt',
       createdAt: 'createdAt',
-      tags: 'tags',
+      tags: { json: 'tags' },
     },
   },
   {
@@ -202,18 +218,45 @@ function resolveHtmlField(spec, match, docText, idx, matchedText) {
 }
 
 // ---------------- 解析入口 ----------------
+// 标准字段：任何源都映射到统一输出（pkg/name/description/version/category/homepage）。
+// 扩展字段：fields 中其它任意键 → 进 packaged.meta（可按 numeric/boolean 标注类型），
+// 供渲染层按 source.defaultSort 等通用逻辑使用，不绑定任何特定市场。
+const STANDARD_KEYS = ['name', 'description', 'version', 'category', 'homepage', 'pkg']
+
 function buildCommon(out, source) {
   // 无显式 pkg 时回退用 name（自定义 catalog JSON 源无 install 字段时的兜底）
   if (!out.pkg && out.name) out.pkg = out.name
   if (!out.pkg) return null
   if (!out.name) out.name = out.pkg
   const built = { id: out.id || out.pkg, name: out.name, description: out.description || '', version: out.version || '', category: out.category || '', homepage: out.homepage || '', pkg: out.pkg, source: source.name || '' }
-  // 透传扩展字段（对齐市场网站排序/筛选逻辑）
-  for (const k of ['score', 'stars', 'needsConfig', 'pushedAt', 'createdAt']) {
-    if (out[k] != null && out[k] !== '') built[k] = out[k]
-  }
-  if (out.tagsArr) built.tagsArr = out.tagsArr
+  if (out.meta && Object.keys(out.meta).length) built.meta = out.meta
   return built
+}
+
+// 通用扩展字段提取：任意 key -> 原值（按 spec.numeric/boolean 做类型标注）
+// rawReader: (spec) => 原始值 | null —— json 源取路径原始值（保类型），html 源返回字符串
+function extractExtras(fields, entry, rawReader) {
+  const meta = {}
+  for (const key of Object.keys(fields)) {
+    if (STANDARD_KEYS.includes(key)) continue
+    const spec = fields[key]
+    let raw = null
+    try {
+      raw = rawReader(spec)
+    } catch (_) { raw = null }
+    if (raw == null || raw === '') continue
+    if (spec && typeof spec === 'object' && spec.numeric) {
+      const n = Number(raw)
+      meta[key] = Number.isNaN(n) ? null : n
+    } else if (spec && typeof spec === 'object' && spec.boolean) {
+      meta[key] = raw === true || raw === 'true' || raw === 1
+    } else if (Array.isArray(raw)) {
+      meta[key] = raw.map(String)
+    } else {
+      meta[key] = String(raw)
+    }
+  }
+  return Object.keys(meta).length ? meta : null
 }
 
 function parseJsonSource(source, body) {
@@ -229,19 +272,25 @@ function parseJsonSource(source, body) {
   return list
     .map((entry, i) => {
       const out = { id: String(entry.id || entry.name || i) }
-      for (const key of ['name', 'description', 'version', 'category', 'homepage', 'pkg']) {
+      for (const key of STANDARD_KEYS) {
         out[key] = fields[key] != null ? resolveJsonField(fields[key], entry) : (entry[key] != null ? String(entry[key]) : '')
       }
-      // 扩展字段捕获（对齐市场网站排序/筛选：score/stars/needsConfig/时间/完整 tags）
-      if (fields.score != null) out.score = Number(String(resolveJsonField(fields.score, entry)) || 0)
-      if (fields.stars != null) out.stars = Number(String(resolveJsonField(fields.stars, entry)) || 0)
-      if (fields.needsConfig != null) out.needsConfig = String(resolveJsonField(fields.needsConfig, entry) || '') === 'true'
-      if (fields.pushedAt != null) out.pushedAt = String(resolveJsonField(fields.pushedAt, entry) || '')
-      if (fields.createdAt != null) out.createdAt = String(resolveJsonField(fields.createdAt, entry) || '')
-      if (fields.tags != null && !out.tagsArr) {
-        const t = resolveJsonField(fields.tags, entry)
-        out.tagsArr = Array.isArray(t) ? t.map(String) : String(t || '').split(',').map((x) => x.trim()).filter(Boolean)
-      }
+      out.meta = extractExtras(fields, entry, (spec) => {
+        // 扩展字段原始值：string='路径'、{json}=路径原值、数组=取首个非空、{const}=常量
+        if (typeof spec === 'string') return pickPath(entry, spec)
+        if (Array.isArray(spec)) {
+          for (const cand of spec) {
+            const v = typeof cand === 'string' ? pickPath(entry, cand) : (cand && cand.json != null ? pickPath(entry, cand.json) : null)
+            if (v != null && v !== '') return v
+          }
+          return null
+        }
+        if (spec && typeof spec === 'object') {
+          if (spec.const != null) return spec.const
+          if (spec.json != null) return pickPath(entry, Array.isArray(spec.json) ? spec.json[0] : spec.json)
+        }
+        return null
+      })
       return buildCommon(out, source)
     })
     .filter((p) => p)
@@ -339,6 +388,45 @@ async function listInstalledPlugins(binPath, homeDir, extraEnv = {}) {
   return out2
 }
 
+// 直接使用内置 pnpm 运行命令（绕过 dsh CLI，避免参数解析问题）
+// pnpmBin: pnpm.cjs 路径，profileDir: ~/.dsh/profiles/web
+async function runPnpm(pnpmBin, profileDir, args, extraEnv = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--expose-internals', pnpmBin, ...args], {
+      cwd: profileDir,
+      env: { ...process.env, ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    const push = (d) => { out += d.toString() }
+    child.stdout.on('data', push)
+    child.stderr.on('data', push)
+    child.on('error', (e) => resolve({ code: -1, log: out + '\n' + e.message }))
+    child.on('exit', (code) => resolve({ code: code || 0, log: out }))
+  })
+}
+
+// 使用 pnpm ls --json 列出已安装的插件（解析 JSON 输出，更可靠）
+async function pnpmListPlugins(pnpmBin, profileDir, extraEnv = {}) {
+  const r = await runPnpm(pnpmBin, profileDir, ['ls', '--json', '--depth', '0'], extraEnv)
+  if (r.code !== 0) return []
+  try {
+    const parsed = JSON.parse(r.log)
+    if (!Array.isArray(parsed)) return []
+    const result = []
+    for (const entry of parsed) {
+      if (entry.dependencies && typeof entry.dependencies === 'object') {
+        for (const [name, dep] of Object.entries(entry.dependencies)) {
+          result.push({ name, version: dep.version || '' })
+        }
+      }
+    }
+    return result
+  } catch (_) {
+    return []
+  }
+}
+
 module.exports = {
   DEFAULT_MARKET_SOURCES,
   normalizeMarketSources,
@@ -350,4 +438,6 @@ module.exports = {
   pnpmEnv,
   runDshPlugin,
   listInstalledPlugins,
+  runPnpm,
+  pnpmListPlugins,
 }

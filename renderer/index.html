@@ -317,38 +317,13 @@
           <div class="plugin-toolbar">
             <select id="marketActive" style="flex:0 0 200px"></select>
             <button type="button" class="btn ghost" id="marketRefresh">浏览 / 刷新</button>
-            <input id="marketSearch" type="search" placeholder="搜索插件名 / 描述…" />
-          </div>
-          <div class="plugin-toolbar">
-            <span class="fg-label">排序</span>
-            <select id="mktSort">
-              <option value="score">实用分</option>
-              <option value="stars">热度</option>
-              <option value="newest">最新</option>
-            </select>
-            <span class="fg-label">视图</span>
-            <select id="mktView">
-              <option value="all">全部插件</option>
-              <option value="elite">高分精选 ≥80</option>
-              <option value="friendly">新手友好</option>
-              <option value="fresh">最新上架</option>
-            </select>
-            <span class="fg-label">星级</span>
-            <select id="mktStars">
-              <option value="">全部</option>
-              <option value="lt10">新插件 &lt;10★</option>
-              <option value="10-50">10-50★</option>
-              <option value="50">50+★</option>
-            </select>
-            <span class="fg-label">配置</span>
-            <select id="mktCfg">
-              <option value="">全部</option>
-              <option value="ready">开箱即用</option>
-              <option value="config">需配置</option>
-            </select>
-            <span class="hint" id="mktCount" style="margin-left:auto;margin-top:0"></span>
+            <input id="marketSearch" type="search" placeholder="按插件名搜索…" />
           </div>
           <div class="plugin-list" id="marketPlugins"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="manualInstallInput" type="text" placeholder="手动安装：粘贴包名或完整命令，支持多包空格分隔" style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid #2a3050;background:#0d1122;color:#e6e9f5;font-size:12px;outline:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace" />
+            <button type="button" class="btn" id="manualInstallBtn" style="margin-top:0;white-space:nowrap">安装</button>
+          </div>
           <div class="market">
             <div class="hint" style="margin-top:14px">已安装插件（重启服务后生效）</div>
             <div class="installed-list" id="installedList"></div>
@@ -514,7 +489,7 @@
       $('cfgShowFloat').checked = cfg.showFloat !== false
       toggleMode()
       loadIconPicker()
-      loadPrompts()
+      await loadPrompts()
       loadMarketSources()
       refreshInstalled()
       $('settingsMsg').textContent = ''
@@ -523,6 +498,16 @@
     $('settingsForm').addEventListener('submit', async (e) => {
       e.preventDefault()
       const msgEl = $('settingsMsg')
+      // 快捷指令：如果输入框有未保存的内容，自动添加到列表并保存
+      const pname = $('newPromptName').value.trim()
+      const pcontent = $('newPromptContent').value.trim()
+      if (pname && pcontent) {
+        promptList = [...promptList, { id: 'p' + Date.now(), name: pname, content: pcontent }]
+        try { await window.dshDesktop.savePrompts(promptList) } catch (_) {}
+        $('newPromptName').value = ''
+        $('newPromptContent').value = ''
+        renderPrompts()
+      }
       const cfg = {
         mode: $('cfgMode').value,
         lanPort: parseInt($('cfgLanPort').value, 10),
@@ -571,7 +556,7 @@
         del.title = '删除'
         del.addEventListener('click', async () => {
           promptList = promptList.filter((x) => x.id !== p.id)
-          await window.dshDesktop.savePrompts(promptList)
+          try { await window.dshDesktop.savePrompts(promptList) } catch (_) {}
           renderPrompts()
         })
         row.appendChild(name)
@@ -592,7 +577,7 @@
         ...promptList,
         { id: 'p' + Date.now(), name, content },
       ]
-      await window.dshDesktop.savePrompts(promptList)
+      try { await window.dshDesktop.savePrompts(promptList) } catch (_) {}
       $('newPromptName').value = ''
       $('newPromptContent').value = ''
       renderPrompts()
@@ -926,42 +911,28 @@
 
     function renderMarketPlugins() {
       const q = ($('marketSearch').value || '').trim().toLowerCase()
-      const sortKey = $('mktSort').value
-      const view = $('mktView').value
-      const starsKey = $('mktStars').value
-      const cfgKey = $('mktCfg').value
       const box = $('marketPlugins')
       box.innerHTML = ''
-      // 排序/筛选与 dsh.market 网站前端逻辑对齐
       let list = marketPlugins.slice()
-      if (view === 'elite') list = list.filter((p) => (p.score || 0) >= 80)
-      else if (view === 'friendly') list = list.filter((p) => (p.score || 0) >= 60 && !p.needsConfig)
-      else if (view === 'fresh') list = [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 24)
-      if (starsKey === 'lt10') list = list.filter((p) => (p.stars || 0) < 10)
-      else if (starsKey === '10-50') list = list.filter((p) => (p.stars || 0) >= 10 && (p.stars || 0) < 50)
-      else if (starsKey === '50') list = list.filter((p) => (p.stars || 0) >= 50)
-      if (cfgKey === 'ready') list = list.filter((p) => !p.needsConfig)
-      else if (cfgKey === 'config') list = list.filter((p) => !!p.needsConfig)
-      // 搜索排名：全名精确 0 < 前缀 1 < 其它 2，平局按实用分降序
-      if (q) {
-        const rank = (name) => {
-          const n = String(name || '').toLowerCase()
-          if (n === q) return 0
-          if (n.startsWith(q)) return 1
-          return 2
+      // 按名字筛选
+      if (q) list = list.filter((p) => (p.name || '').toLowerCase().includes(q) || (p.pkg || '').toLowerCase().includes(q))
+      // 通用排序协议：取当前源描述符的 defaultSort（field 指向解析出的 meta 扩展字段），
+      // 数值按数值比较、否则按字符串比较；无 defaultSort 的源保持原始顺序。
+      const src = marketSources.find((s) => s.id === marketActiveId)
+      if (src && src.defaultSort && src.defaultSort.field) {
+        const f = src.defaultSort.field
+        const dir = src.defaultSort.dir === 'asc' ? 1 : -1
+        if (list.some((p) => (p.meta || {})[f] != null)) {
+          list.sort((a, b) => {
+            const va = (a.meta || {})[f]
+            const vb = (b.meta || {})[f]
+            const na = typeof va === 'number' ? va : Number(va)
+            const nb = typeof vb === 'number' ? vb : Number(vb)
+            if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * dir
+            return String(va || '').localeCompare(String(vb || '')) * dir
+          })
         }
-        list = list
-          .filter((p) =>
-            rank(p.name) !== 2 ||
-            (p.description || '').toLowerCase().includes(q) ||
-            (p.category || '').toLowerCase().includes(q) ||
-            (p.tagsArr || []).some((t) => t.toLowerCase().includes(q)))
-          .sort((a, b) => rank(a.name) - rank(b.name) || (b.score || 0) - (a.score || 0))
       }
-      if (sortKey === 'score') list.sort((a, b) => (b.score || 0) - (a.score || 0))
-      else if (sortKey === 'stars') list.sort((a, b) => (b.stars || 0) - (a.stars || 0))
-      else if (sortKey === 'newest') list.sort((a, b) => String(b.pushedAt || '').localeCompare(String(a.pushedAt || '')))
-      $('mktCount').textContent = list.length ? '共 ' + list.length + ' 个插件' : ''
       if (!list.length) {
         box.innerHTML = '<div class="hint" style="margin:0">该源暂无匹配插件，点"浏览 / 刷新"加载</div>'
         return
@@ -1045,8 +1016,48 @@
       }
     }
     $('marketSearch').addEventListener('input', renderMarketPlugins)
-    ;['mktSort', 'mktView', 'mktStars', 'mktCfg'].forEach((id) => {
-      $(id).addEventListener('change', renderMarketPlugins)
+    function parseInstallInput(raw) {
+      const text = (raw || '').trim()
+      if (!text) return []
+      const m = text.match(/(?:^|\s)(?:add|install|i)\s+(.+)$/)
+      if (m && /^(dsh|pnpm|npm|yarn)\b/.test(text)) {
+        return m[1].split(/\s+/).filter((t) => t && !t.startsWith('-'))
+      }
+      return text.split(/\s+/).filter((t) => t && !t.startsWith('-'))
+    }
+    $('manualInstallBtn').addEventListener('click', async () => {
+      const input = $('manualInstallInput')
+      const raw = input.value.trim()
+      if (!raw) return
+      const pkgs = parseInstallInput(raw)
+      if (!pkgs.length) { showMarketLog('未识别到插件包名，请输入包名或完整安装命令', 'err'); return }
+      if (currentMode === 'remote' && !remoteCapable) {
+        showMarketLog(remoteCapableAuthError ? '远端密码错误，无法远程安装' : '远端不是桌面版服务，无法远程安装', 'err')
+        return
+      }
+      const btn = $('manualInstallBtn')
+      btn.disabled = true
+      btn.textContent = '安装中…'
+      let okCount = 0
+      const logs = []
+      for (const p of pkgs) {
+        showMarketLog('正在安装 ' + p + ' …')
+        try {
+          const r = await window.dshDesktop.pluginInstall(p)
+          if (r.ok) okCount++
+          logs.push('【' + p + '】' + (r.log || (r.ok ? '成功' : '失败')))
+        } catch (e) {
+          logs.push('【' + p + '】' + (e.message || e))
+        }
+      }
+      showMarketLog(logs.join('\n\n'), okCount === pkgs.length ? 'ok' : 'err')
+      input.value = ''
+      btn.disabled = false
+      btn.textContent = '安装'
+      await refreshInstalled()
+    })
+    $('manualInstallInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('manualInstallBtn').click()
     })
     $('marketRefresh').addEventListener('click', async () => {
       const src = marketSources.find((s) => s.id === marketActiveId)

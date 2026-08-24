@@ -16,7 +16,7 @@ if (window.location.protocol === 'file:') {
   saveConfig: (cfg) => ipcRenderer.invoke('dsh:save-config', cfg),
   getIcons: () => ipcRenderer.invoke('dsh:get-icons'),
   getPrompts: () => ipcRenderer.invoke('dsh:get-prompts'),
-  savePrompts: (arr) => ipcRenderer.invoke('dsh:save-prompts'),
+  savePrompts: (arr) => ipcRenderer.invoke('dsh:save-prompts', arr),
   getMarketSources: () => ipcRenderer.invoke('dsh:get-market-sources'),
   saveMarketSources: (arr) => ipcRenderer.invoke('dsh:save-market-sources', arr),
   marketBrowse: (id) => ipcRenderer.invoke('dsh:market-browse', id),

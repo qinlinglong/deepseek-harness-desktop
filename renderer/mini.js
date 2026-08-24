@@ -86,8 +86,13 @@ promptsBtn.addEventListener('click', async () => {
   renderPromptList()
   promptList.classList.toggle('open')
 })
-document.addEventListener('click', (e) => {
-  if (!promptList.contains(e.target) && e.target !== promptsBtn) promptList.classList.remove('open')
+document.addEventListener('pointerdown', (e) => {
+  if (promptList.classList.contains('open') && !promptList.contains(e.target) && e.target !== promptsBtn) {
+    promptList.classList.remove('open')
+  }
+}, true)
+view.addEventListener('focus', () => {
+  promptList.classList.remove('open')
 })
 
 document.getElementById('newChat').addEventListener('click', clickNewSession)

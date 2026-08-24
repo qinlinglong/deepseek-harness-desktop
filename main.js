@@ -260,10 +260,21 @@ function loadPrompts() {
   return promptsCache
 }
 function savePrompts(arr) {
-  promptsCache = normalPrompts(arr)
+  log('main', `savePrompts: received arr type=${typeof arr} isArray=${Array.isArray(arr)} len=${Array.isArray(arr) ? arr.length : 'N/A'}`)
+  if (Array.isArray(arr) && arr.length > 0) {
+    log('main', `savePrompts: first item keys=${Object.keys(arr[0]).join(',')} name=${JSON.stringify(arr[0].name)} content=${JSON.stringify((arr[0].content || '').slice(0, 30))}`)
+  }
+  const normalized = normalPrompts(arr)
+  // 安全检查：如果归一化后为空，但之前有缓存数据，说明数据可能损坏，拒绝覆盖
+  if (normalized.length === 0 && promptsCache && promptsCache.length > 0) {
+    log('main', `savePrompts: REFUSED to overwrite ${promptsCache.length} items with empty array`)
+    return promptsCache
+  }
+  promptsCache = normalized
   try {
     fs.mkdirSync(app.getPath('userData'), { recursive: true })
     fs.writeFileSync(promptsFile(), JSON.stringify(promptsCache, null, 2), { mode: 0o600 })
+    log('main', `savePrompts: wrote ${promptsCache.length} items to ${promptsFile()}`)
   } catch (e) {
     log('main', `savePrompts: ${e.message}`)
   }
@@ -451,14 +462,19 @@ function pnpmCliPath() {
 // 必须用全局布局：pnpm 一旦发现自己位于某项目的 node_modules 内，会试图 re-exec
 // 该项目本地的 node_modules/pnpm，而干净机器上该路径不存在 → 安装崩溃。
 function ensureGlobalPnpm() {
-  const srcDir = path.dirname(pnpmCliPath()) // <app>/node_modules/pnpm
+  // pnpmCliPath() 返回 node_modules/pnpm/bin/pnpm.cjs
+  // path.dirname 得到 node_modules/pnpm/bin，需要再上一级才是 pnpm 根目录
+  const srcDir = path.dirname(path.dirname(pnpmCliPath()))
   const root = path.join(app.getPath('userData'), 'pnpm-global', 'node_modules')
   const dstDir = path.join(root, 'pnpm')
-  if (!fs.existsSync(dstDir)) {
+  const pnpmBin = path.join(dstDir, 'bin', 'pnpm.cjs')
+  const pnpmDist = path.join(dstDir, 'dist', 'pnpm.cjs')
+  if (!fs.existsSync(pnpmBin) || !fs.existsSync(pnpmDist)) {
+    if (fs.existsSync(dstDir)) fs.rmSync(dstDir, { recursive: true })
     fs.mkdirSync(root, { recursive: true })
     fs.cpSync(srcDir, dstDir, { recursive: true })
   }
-  return path.join(dstDir, 'bin', 'pnpm.cjs')
+  return pnpmBin
 }
 
 let _shimDir = null
@@ -469,6 +485,58 @@ function pluginEnv(homeDir) {
     market.buildPnpmShims(_shimDir, process.execPath, pnpmBin)
   }
   return market.pnpmEnv(_shimDir, homeDir, PKG_REGISTRY)
+}
+
+function pnpmProfilePaths() {
+  const pnpmBin = ensureGlobalPnpm()
+  const profileDir = path.join(app.getPath('home'), '.dsh', 'profiles', 'web')
+  return { pnpmBin, profileDir }
+}
+
+function getBundledSdkVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+    return pkg.version || '0.0.0'
+  } catch (_) {
+    return '0.0.0'
+  }
+}
+
+async function checkPkgCompatibility(pkgName) {
+  const sdkVersion = getBundledSdkVersion()
+  const baseName = pkgName.replace(/@[^/@]+$/, '')
+  try {
+    const { body } = await market.httpGetText(`https://registry.npmmirror.com/${encodeURIComponent(baseName).replace('%40', '@')}/latest`, { timeout: 10000 })
+    const info = JSON.parse(body)
+    const deps = info.dependencies || {}
+    const warnings = []
+    for (const [dep, range] of Object.entries(deps)) {
+      if (!dep.startsWith('@deepseek-ai/dsh-')) continue
+      if (!range || typeof range !== 'string') continue
+      const clean = range.replace(/^[\^~>=<]+/, '').split(' ')[0].replace(/[^0-9.]/g, '')
+      if (!clean) continue
+      const parts = clean.split('.').map(Number)
+      const sdkParts = sdkVersion.split('.').map(Number)
+      let incompatible = false
+      if (range.startsWith('>=')) {
+        for (let i = 0; i < Math.max(parts.length, sdkParts.length); i++) {
+          const a = parts[i] || 0, b = sdkParts[i] || 0
+          if (a > b) { incompatible = true; break }
+          if (a < b) break
+        }
+      } else if (range.startsWith('^') || range.startsWith('~')) {
+        if (parts[0] > sdkParts[0] || (parts[0] === sdkParts[0] && (parts[1] || 0) > (sdkParts[1] || 0))) {
+          incompatible = true
+        }
+      }
+      if (incompatible) {
+        warnings.push(`${dep} 要求 ${range}，当前 SDK 版本为 ${sdkVersion}`)
+      }
+    }
+    return warnings
+  } catch (_) {
+    return []
+  }
 }
 
 function probe(port) {
@@ -1467,7 +1535,12 @@ async function handleDesktopApi(req, res) {
       try { const o = JSON.parse(body); pkg = String(o.pkg || ''); action = o.action === 'remove' ? 'remove' : 'add' } catch (_) {}
       if (!pkg) { res.writeHead(400); res.end(JSON.stringify({ ok: false, log: '缺少包名' })); return }
       try {
-        const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), [action, pkg], pluginEnv(app.getPath('home')))
+        const { pnpmBin, profileDir } = pnpmProfilePaths()
+        const env = pluginEnv(app.getPath('home'))
+        const r = await market.runPnpm(pnpmBin, profileDir, [action, pkg], env)
+        if (r.code === 0) {
+          await market.runDshPlugin(dshBinPath(), app.getPath('home'), [action, pkg], env)
+        }
         res.writeHead(200)
         res.end(JSON.stringify({ ok: r.code === 0, log: r.log }))
       } catch (e) {
@@ -1479,7 +1552,8 @@ async function handleDesktopApi(req, res) {
   }
   if (req.method === 'GET' && url === '/desktop/plugin-list') {
     try {
-      const list = await market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home')))
+      const { pnpmBin, profileDir } = pnpmProfilePaths()
+      const list = await market.pnpmListPlugins(pnpmBin, profileDir, pluginEnv(app.getPath('home')))
       res.writeHead(200)
       res.end(JSON.stringify(list))
     } catch (e) {
@@ -2232,7 +2306,23 @@ function registerIpc() {
       if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
       return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
     }
-    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)], pluginEnv(app.getPath('home')))
+    const warnings = await checkPkgCompatibility(String(pkg))
+    if (warnings.length > 0) {
+      return { ok: false, log: 'SDK 版本不兼容，无法安装此插件：\n' + warnings.join('\n') + '\n请等待插件作者更新或升级 Harness SDK。' }
+    }
+    const { pnpmBin, profileDir } = pnpmProfilePaths()
+    const env = pluginEnv(app.getPath('home'))
+    const r = await market.runPnpm(pnpmBin, profileDir, ['add', String(pkg)], env)
+    if (r.code === 0) {
+      await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['add', String(pkg)], env)
+    } else {
+      if (r.log.includes('ERR_PNPM_NO_MATCHING_VERSION')) {
+        const m = r.log.match(/No matching version found for (\S+)/)
+        if (m) {
+          return { ok: false, log: '依赖版本不兼容：' + m[1] + ' 所需版本在当前 npm 源中不存在。\n该插件可能依赖了尚未发布的 SDK 版本，请联系插件作者。' }
+        }
+      }
+    }
     return { ok: r.code === 0, log: r.log }
   })
   ipcMain.handle('dsh:plugin-uninstall', async (_e, pkg) => {
@@ -2245,7 +2335,14 @@ function registerIpc() {
       if (r.status === 401) return { ok: false, log: '远端密码错误，请在设置填写正确的远端访问密码' }
       return { ok: !!(r.json && r.json.ok), log: (r.json && r.json.log) || r.text || ('HTTP ' + r.status) }
     }
-    const r = await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], pluginEnv(app.getPath('home')))
+    const { pnpmBin, profileDir } = pnpmProfilePaths()
+    const env = pluginEnv(app.getPath('home'))
+    const r = await market.runPnpm(pnpmBin, profileDir, ['remove', String(pkg)], env)
+    if (r.code === 0) {
+      await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], env)
+    } else if (r.log.includes('CANNOT_REMOVE_MISSING_DEPS')) {
+      return { ok: true, log: '插件已不在依赖列表中，无需卸载' }
+    }
     return { ok: r.code === 0, log: r.log }
   })
   ipcMain.handle('dsh:plugin-list', async () => {
@@ -2256,7 +2353,8 @@ function registerIpc() {
       if (r.json && Array.isArray(r.json)) return r.json
       return []
     }
-    return market.listInstalledPlugins(dshBinPath(), app.getPath('home'), pluginEnv(app.getPath('home')))
+    const { pnpmBin, profileDir } = pnpmProfilePaths()
+    return market.pnpmListPlugins(pnpmBin, profileDir, pluginEnv(app.getPath('home')))
   })
 }
 

@@ -76,8 +76,8 @@ function staticChecks() {
   check('应用菜单含插件市场直达', mainSrc.includes("showSettings('pane:market')"))
   check('插件详情弹层存在', idxHtml.includes('pluginModal') && idxHtml.includes('pmCmd') && idxHtml.includes('pmInstall'))
   check('DOM 按钮均带 type=button 防误提交', (idxHtml.match(/createElement\('button'\)/g) || []).length === (idxHtml.match(/\.type = 'button'/g) || []).length)
-  // 市场排序/筛选工具栏（对齐 dsh.market 网站逻辑）
-  check('市场排序/筛选工具栏存在', idxHtml.includes('mktSort') && idxHtml.includes('mktView') && idxHtml.includes('mktStars') && idxHtml.includes('mktCfg'))
+  // 市场仅保留名字搜索，无筛选控件；排序/默认条件内嵌对齐市场源默认（如 dsh.market 实用分降序）
+  check('市场仅保留名字搜索(无筛选控件)', idxHtml.includes('id="marketSearch"') && !idxHtml.includes('mktSort') && !idxHtml.includes('mktView') && !idxHtml.includes('mktStars'))
   // 防止 market 方法被裸调用（如 normalizeMarketSources 忘写 market. 前缀 → 启动时 ReferenceError）
   const bareMarketCall = /[^.\w](normalizeMarketSources|runDshPlugin|listInstalledPlugins|browseMarket|buildPnpmShims|pnpmEnv)\(/.test(mainSrc)
   check('main 中 market 方法均带 market. 前缀', !bareMarketCall)
@@ -113,7 +113,8 @@ function marketChecks() {
     const list = market.parseJsonSource(dshSrc, fs.readFileSync(pmFile, 'utf8'))
     check('dsh.market 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
     check('dsh.market 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
-    check('dsh.market 提取排序字段(score/stars)', list.every((p) => typeof p.score === 'number') && list.every((p) => typeof p.stars === 'number'))
+    check('通用扩展字段(meta+numeric/boolean)', list.every((p) => typeof (p.meta && p.meta.score) === 'number') && list.every((p) => typeof (p.meta && p.meta.stars) === 'number') && list.every((p) => typeof (p.meta && p.meta.needsConfig) === 'boolean'))
+    check('内置源声明默认排序 defaultSort', market.DEFAULT_MARKET_SOURCES[0].defaultSort && market.DEFAULT_MARKET_SOURCES[0].defaultSort.field === 'score')
   } else {
     check('dsh.market 样本存在', false, '缺少 /tmp/mkt/plugins.json')
   }
