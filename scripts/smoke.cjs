@@ -97,6 +97,11 @@ function marketChecks() {
   try { market = require(path.join(ROOT, 'scripts', 'market.js')) } catch (e) { check('require market.js', false, e.message); return }
   check('require market.js', true)
   check('内置预设为完整描述符', market.DEFAULT_MARKET_SOURCES.every((s) => s.format && s.url && s.fields))
+  // 旧配置（仅 type/url）须被补全内置 fields，否则解析 0 插件
+  {
+    const oldSrc = market.normalizeMarketSources([{ id: 'dshmarket', name: 'dsh.market', type: 'dshmarket', url: 'https://dsh.market/plugins.json' }])[0]
+    check('旧格式源补全内置 fields/pk', !!(oldSrc.fields && oldSrc.fields.pkg && oldSrc.jsonPath === 'plugins'))
+  }
   const samplesDir = '/tmp/mkt'
   const dshSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'dshmarket')
   const awSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'awesome')

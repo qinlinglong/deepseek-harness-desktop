@@ -81,6 +81,16 @@ function normalizeMarketSources(arr) {
           src = { ...d, ...src }
         }
       }
+      // 旧配置（仅 type/url，无 fields）解析会提取不到 pkg 而被全部过滤成 0 个插件。
+      // 按内置源的 id/type 补全标准 fields 映射，保证旧配置直接可用。
+      if (!src.fields) {
+        const builtin = DEFAULT_MARKET_SOURCES.find((b) => b.id === src.id || b.type === src.type)
+        if (builtin && builtin.fields) {
+          src.fields = builtin.fields
+          if (!src.jsonPath && builtin.jsonPath) src.jsonPath = builtin.jsonPath
+          if (!src.entryRegex && builtin.entryRegex) src.entryRegex = builtin.entryRegex
+        }
+      }
       if (!src.format) src.format = 'json'
       return src
     })
@@ -186,6 +196,8 @@ function resolveHtmlField(spec, match, docText, idx, matchedText) {
 
 // ---------------- 解析入口 ----------------
 function buildCommon(out, source) {
+  // 无显式 pkg 时回退用 name（自定义 catalog JSON 源无 install 字段时的兜底）
+  if (!out.pkg && out.name) out.pkg = out.name
   if (!out.pkg) return null
   if (!out.name) out.name = out.pkg
   return { id: out.id || out.pkg, name: out.name, description: out.description || '', version: out.version || '', category: out.category || '', homepage: out.homepage || '', pkg: out.pkg, source: source.name || '' }
