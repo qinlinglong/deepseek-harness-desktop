@@ -2091,7 +2091,12 @@ function reapplyMiniTop() {
       miniWin.setAlwaysOnTop(true, FLOAT_LEVEL)
       if (isMac) {
         miniWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-        if (nativeFloatTop) nativeFloatTop.applyNativeFloatTop(miniWin)
+        if (nativeFloatTop) {
+          nativeFloatTop.applyNativeFloatTop(miniWin)
+          // NSPanel 仅需文字输入时才成为 key：既让输入法候选词正常弹出，
+          // 又避免首次从其他 app 打开时抢 key 激活 app 导致跳转桌面 Space。
+          nativeFloatTop.setBecomesKeyOnlyIfNeeded(miniWin, true)
+        }
       }
     } else {
       miniWin.setAlwaysOnTop(false)
@@ -2100,6 +2105,8 @@ function reapplyMiniTop() {
         if (nativeFloatTop) {
           nativeFloatTop.revertNativeFloatTop(miniWin)
           clearAllSpacesSafely(miniWin)
+          // 非置顶态同样保持"仅输入时成 key"：不抢焦点、不切 Space，输入法仍可用
+          nativeFloatTop.setBecomesKeyOnlyIfNeeded(miniWin, true)
         }
       }
     }

@@ -40,6 +40,7 @@ let selSetExcludedFromWindowsMenu = null
 let selSetCanHide = null
 let selSetHasShadow = null
 let selDisableVideoOpacitySafe = null
+let selSetBecomesKeyOnlyIfNeeded = null
 
 // NSCursor（悬浮球拖动时强制手型，参考豆包拖动交互）
 let clsNSCursor = null
@@ -73,6 +74,11 @@ function init() {
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
     selSetCanHide = selReg('setCanHide:')
+    // NSPanel 关键属性：仅当需要文字输入时才成为 key window。
+    // 默认 NSPanel 不成为 key（点击输入框不建立输入上下文），导致输入法
+    // 候选词不弹出；同时首次从其他 app 点击打开时若面板抢 key 会激活 app、
+    // 触发 macOS 切到 app 主窗口所在 Space（跳转桌面）。设为 YES 后两问题同解。
+    selSetBecomesKeyOnlyIfNeeded = selReg('setBecomesKeyOnlyIfNeeded:')
     // NSCursor：拖动悬浮球期间强制手型光标（拖动窗口频繁 setPosition 时
     // Chromium 的重绘可能把 CSS cursor 重置为默认箭头，原生 set 保证手型）
     const objcGetClass = libA.func('void * objc_getClass(const char *name)')
@@ -187,4 +193,26 @@ function setFloatCursor(isHand) {
   }
 }
 
-module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+/**
+ * 设置 NSPanel 的 becomesKeyOnlyIfNeeded（仅需要时成为 key window）。
+ * @param {Electron.BrowserWindow} win
+ * @param {boolean} flag
+ * @returns {boolean} 是否成功
+ */
+function setBecomesKeyOnlyIfNeeded(win, flag) {
+  if (!win || win.isDestroyed()) return false
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow) return false
+    if (selSetBecomesKeyOnlyIfNeeded) msg1(nsWindow, selSetBecomesKeyOnlyIfNeeded, flag ? 1 : 0)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, setBecomesKeyOnlyIfNeeded, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
