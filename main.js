@@ -31,8 +31,11 @@ try {
 const isMac = process.platform === 'darwin'
 const market = require('./scripts/market.js')
 const APP_TITLE = 'DeepSeek Harness'
-// 悬浮球窗口层级：用 'pop-up-menu'（NSPopUpMenuWindowLevel=101），足够高于
-// 普通/最大化窗口(0)。macOS 上由 native-float.js 原生覆盖为 level=27（豆包实测值）。
+// 悬浮球窗口层级：'pop-up-menu'（NSPopUpMenuWindowLevel=101），足够高于
+// 普通/最大化窗口(0)。注意：
+//   - Windows/Linux：此值直接生效（Electron setAlwaysOnTop 的预设层级）。
+//   - macOS：由 native-float.js 的 applyNativeFloatTop() 原生覆盖为 level=27
+//     （豆包实测值），此预设值仅作为原生覆盖前的基线，最终以原生 27 为准。
 // 不用 'screen-saver'(1000)：太高被系统级窗口过滤。
 const FLOAT_LEVEL = 'pop-up-menu'
 const dshVersion = require('@deepseek-ai/dsh/package.json').version
@@ -104,10 +107,7 @@ const MINI_CSS = `
 
 let mainWindow = null
 let tray = null
-let trayMenu = null // 托盘右键菜单，供副屏"菜单栏图标"复用
-// 副屏幕上的"菜单栏图标"窗口：macOS 菜单栏 StatusItem 只显示在主显示器，
-// 为对齐豆包（每屏状态栏都有入口），给每个非主屏各建一个贴顶小图标窗口。
-const menuBarWins = new Map() // displayId -> BrowserWindow
+let trayMenu = null // 托盘右键菜单（预留引用，供后续复用）
 let floatWin = null
 let miniWin = null
 let miniPinned = true
@@ -386,7 +386,6 @@ function applyIcon() {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(img)
     if (isMac && app.dock) app.dock.setIcon(img)
     sendFloatIcon()
-    refreshMenuBarIcons()
   } catch (e) {
     log('main', `applyIcon: ${e.message}`)
   }
@@ -1655,7 +1654,7 @@ function createTray() {
 
   // 主屏：原生托盘（NSStatusItem，菜单栏条内）。实证：Electron Tray 只会显示在
   // 主显示器菜单栏条内；副屏无法放入可点击的原生条内图标（ObjC 回调限制），
-  // 由 syncMenuBarIcons 在副屏放"紧贴菜单栏下沿"的胶囊图标兜底。
+  // 副屏入口由悬浮球（floatWin）覆盖，可拖到任意屏幕角落。
 
   let icon
   try {
@@ -1679,19 +1678,6 @@ function createTray() {
     tray.on('click', () => restoreWindow())
   }
 }
-
-function syncMenuBarIcons() {
-  // 副屏原生图标：macOS 公开 API 下，NSStatusItem 只显示在"活跃显示器"
-  // 菜单栏（单实例），豆包两屏条内都有是因为用了私有 API（setScreen: +
-  // 私有回调），koffi 无法注册 ObjC IMP / CGEventTap 回调。副屏入口
-  // 由悬浮球（floatWin）覆盖，可拖到任意屏幕角落。
-  for (const [id, win] of menuBarWins) {
-    if (!win.isDestroyed()) win.close()
-  }
-  menuBarWins.clear()
-}
-
-function refreshMenuBarIcons() { syncMenuBarIcons() }
 
 function showSettings(preMode) {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -2082,20 +2068,22 @@ function sendMiniUrl() {
   if (url) miniWin.webContents.send('mini:url', url)
 }
 
-// 迷你窗置顶（豆包同款 NSPanel + 原生 level=27 + collectionBehavior）。
+// 迷你窗置顶（豆包同款 NSPanel + collectionBehavior）。
 // miniPinned=true 时置顶并跨 Space，false 时恢复普通窗口。
+// 注意：迷你窗是聊天窗口，必须能接收输入法候选词。候选词窗口 level 约 25
+// （NSStatusWindowLevel），若迷你窗 level 设为 27（screen-saver 级）会遮挡候选词，
+// 表现为"能打中文但看不到待选词"。故迷你窗用 NSFloatingWindowLevel(3)：
+// 既在普通窗口(0)之上置顶，又低于候选词窗口(25)。
+const MINI_FLOAT_LEVEL = 3 // NSFloatingWindowLevel
 function reapplyMiniTop() {
   if (!miniWin || miniWin.isDestroyed()) return
   try {
     if (miniPinned) {
-      miniWin.setAlwaysOnTop(true, FLOAT_LEVEL)
+      miniWin.setAlwaysOnTop(true, 'floating')
       if (isMac) {
         miniWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
         if (nativeFloatTop) {
-          nativeFloatTop.applyNativeFloatTop(miniWin)
-          // NSPanel 仅需文字输入时才成为 key：既让输入法候选词正常弹出，
-          // 又避免首次从其他 app 打开时抢 key 激活 app 导致跳转桌面 Space。
-          nativeFloatTop.setBecomesKeyOnlyIfNeeded(miniWin, true)
+          nativeFloatTop.applyNativeFloatTop(miniWin, MINI_FLOAT_LEVEL)
         }
       }
     } else {
@@ -2105,8 +2093,6 @@ function reapplyMiniTop() {
         if (nativeFloatTop) {
           nativeFloatTop.revertNativeFloatTop(miniWin)
           clearAllSpacesSafely(miniWin)
-          // 非置顶态同样保持"仅输入时成 key"：不抢焦点、不切 Space，输入法仍可用
-          nativeFloatTop.setBecomesKeyOnlyIfNeeded(miniWin, true)
         }
       }
     }
@@ -2155,9 +2141,10 @@ function toggleMini() {
   } else {
     reapplyMiniTop()
     positionMiniNearFloat()
-    // showInactive：不激活 app、不切换 Space。若用 focus() 打开，第一次点击
-    // 悬浮球时 app 未激活，focus 会触发 macOS 切换到 app 所在桌面 Space（跳转桌面）。
-    miniWin.showInactive()
+    // panel 的 show() 会 makeKeyAndOrderFront 成为 key window（输入法候选词
+    // 可弹出），但因 ElectronNSPanel 自带 NonactivatingPanel 掩码，不会激活
+    // app、不会切换 Space（豆包/Spotlight 同款行为）。
+    miniWin.show()
     sendMiniUrl()
   }
 }
@@ -2242,7 +2229,7 @@ function registerIpc() {
     remoteHost: config.remoteHost,
     remotePort: config.remotePort,
     remoteScheme: config.remoteScheme,
-    remotePassword: config.remotePassword || '',
+    hasRemotePassword: !!config.remotePassword,
     remoteCapable,
     remoteCapableAuthError,
     hasPassword: !!config.passwordHash,
@@ -2258,7 +2245,10 @@ function registerIpc() {
     config.remotePort = clampInt(cfg && cfg.remotePort, 1, 65535, 3080)
     config.remoteHost = String((cfg && cfg.remoteHost) || '').trim().replace(/^https?:\/\//, '')
     config.remoteScheme = cfg && cfg.remoteScheme === 'https' ? 'https' : 'http'
-    config.remotePassword = String((cfg && cfg.remotePassword) || '')
+    // 远端密码：留空保持不变（对齐局域网密码的"留空不改"语义）；显式输入才更新
+    if (cfg && cfg.remotePassword && String(cfg.remotePassword).trim()) {
+      config.remotePassword = String(cfg.remotePassword)
+    }
     if (ICON_FILES[cfg && cfg.icon]) config.icon = cfg.icon
     if (cfg && typeof cfg.showFloat === 'boolean') config.showFloat = cfg.showFloat
     if (mode === 'lan' && !config.passwordHash && !(cfg && cfg.password && String(cfg.password).trim())) {
@@ -2384,7 +2374,6 @@ async function onReady() {
   createTray()
   applyIcon()
   registerIpc()
-  syncMenuBarIcons()
   applyFloatState()
   registerScreenMetricsListener()
   registerGlobalShortcuts()
@@ -2438,12 +2427,12 @@ function setupMiniCssInjection(win) {
 
 function createMiniWindow(focusAfterShow = false) {
   if (miniWin && !miniWin.isDestroyed()) {
-    // 已存在：点击悬浮球打开用 showInactive（不切 Space），快捷键呼出才 focus
+    // 已存在：panel 的 show() 不激活 app 但成为 key window（输入法候选词可用）
     if (focusAfterShow) {
       miniWin.show()
       miniWin.focus()
     } else {
-      miniWin.showInactive()
+      miniWin.show()
     }
     return
   }
@@ -2462,7 +2451,7 @@ function createMiniWindow(focusAfterShow = false) {
       miniWin.show()
       miniWin.focus()
     } else {
-      miniWin.showInactive()
+      miniWin.show()
     }
     // resize 持久化（与下方新建路径一致）
     let saveMiniTimer = null
@@ -2518,7 +2507,7 @@ function createMiniWindow(focusAfterShow = false) {
       miniWin.show()
       miniWin.focus()
     } else {
-      miniWin.showInactive()
+      miniWin.show()
     }
   })
   // 迷你窗尺寸变化时持久化（防抖 600ms）
@@ -2604,10 +2593,6 @@ app.on('before-quit', (e) => {
   for (const w of [mainWindow, miniWin, floatWin]) {
     if (w && !w.isDestroyed()) w.destroy()
   }
-  for (const [id, win] of menuBarWins) {
-    if (win && !win.isDestroyed()) win.destroy()
-  }
-  menuBarWins.clear()
   // 兜底：若 stopServer/stopAuthProxy 异常卡住，4 秒后强制退出
   setTimeout(() => { try { app.exit(0) } catch (_) {} }, 4000)
   // 注销全局快捷键（Electron 会自动做，但显式确保万无一失）
@@ -2647,8 +2632,6 @@ function registerScreenMetricsListener() {
       reapplyFloatTop()
       floatWin.moveTop()
     }
-    // 显示器布局变化（拔插/改主屏）：重建副屏菜单栏图标，保证位置跟随
-    syncMenuBarIcons()
   })
 }
 

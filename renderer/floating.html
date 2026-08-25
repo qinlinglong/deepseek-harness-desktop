@@ -10,7 +10,7 @@
     body { display: flex; align-items: center; justify-content: center; }
     #bubble {
       position: relative;
-      width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+      width: 44px; height: 44px; border-radius: 50%; cursor: grab;
       background: radial-gradient(circle at 30% 28%, #ffffff, #e4e9f4 72%);
       border: 2px solid rgba(110, 132, 210, .65);
       user-select: none;
@@ -24,11 +24,11 @@
       -webkit-mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
               mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
     }
-    #bubble:active { cursor: pointer; }
+    #bubble:active { cursor: grabbing; }
     #bubble.dragging {
       transform: scale(1.12);
       border-color: rgba(110, 132, 210, .9);
-      cursor: pointer; /* 拖动时也是小手（参考豆包） */
+      cursor: grabbing; /* 拖动时握拳小手（豆包同款） */
     }
   </style>
 </head>

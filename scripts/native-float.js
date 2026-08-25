@@ -11,14 +11,13 @@
 let koffi = null
 
 // macOS collectionBehavior 位（NSWindow.h）
-const NSWindowCollectionBehaviorCanJoinAllSpaces = 1 << 0 // 1
+// 注意：ElectronNSPanel(type:'panel') 的 setCollectionBehavior: 会自动 OR 上
+// CanJoinAllSpaces | FullScreenAuxiliary，因此这里只需补充 IgnoresCycle，
+// 不要设置 MoveToActiveSpace（与 CanJoinAllSpaces 互斥，会导致 AppKit 异常）。
 const NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8 // 256
-const NSWindowCollectionBehaviorStationary = 1 << 4 // 16
 const NSWindowCollectionBehaviorIgnoresCycle = 1 << 6 // 64
 const FLOAT_COLLECTION_BEHAVIOR =
-  NSWindowCollectionBehaviorCanJoinAllSpaces |
   NSWindowCollectionBehaviorFullScreenAuxiliary |
-  NSWindowCollectionBehaviorStationary |
   NSWindowCollectionBehaviorIgnoresCycle
 // window level：对齐豆包悬浮球实测 level=27。该值介于 NSStatusWindowLevel(25)
 // 与 NSPopUpMenuWindowLevel(101) 之间，是 macOS 上"始终置顶且不被任何
@@ -40,11 +39,11 @@ let selSetExcludedFromWindowsMenu = null
 let selSetCanHide = null
 let selSetHasShadow = null
 let selDisableVideoOpacitySafe = null
-let selSetBecomesKeyOnlyIfNeeded = null
+
 
 // NSCursor（悬浮球拖动时强制手型，参考豆包拖动交互）
 let clsNSCursor = null
-let selPointingHandCursor = null
+let selClosedHandCursor = null
 let selArrowCursor = null
 let selSetCursor = null
 
@@ -74,16 +73,12 @@ function init() {
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
     selSetCanHide = selReg('setCanHide:')
-    // NSPanel 关键属性：仅当需要文字输入时才成为 key window。
-    // 默认 NSPanel 不成为 key（点击输入框不建立输入上下文），导致输入法
-    // 候选词不弹出；同时首次从其他 app 点击打开时若面板抢 key 会激活 app、
-    // 触发 macOS 切到 app 主窗口所在 Space（跳转桌面）。设为 YES 后两问题同解。
-    selSetBecomesKeyOnlyIfNeeded = selReg('setBecomesKeyOnlyIfNeeded:')
+
     // NSCursor：拖动悬浮球期间强制手型光标（拖动窗口频繁 setPosition 时
     // Chromium 的重绘可能把 CSS cursor 重置为默认箭头，原生 set 保证手型）
     const objcGetClass = libA.func('void * objc_getClass(const char *name)')
     clsNSCursor = objcGetClass('NSCursor')
-    selPointingHandCursor = selReg('pointingHandCursor')
+    selClosedHandCursor = selReg('closedHandCursor')
     selArrowCursor = selReg('arrowCursor')
     selSetCursor = selReg('set')
     initialized = true
@@ -97,9 +92,13 @@ function init() {
 /**
  * 把 Electron 窗口的原生 NSWindow 设为"全屏/所有 Space 下置顶"。
  * @param {Electron.BrowserWindow} win
+ * @param {number} [level] 窗口层级，默认 SCREEN_SAVER_LEVEL(27)。
+ *   悬浮球需要 27 才能"超越一切"置顶；迷你窗等需要接收输入法候选词的窗口
+ *   必须用较低 level（如 NSFloatingWindowLevel=3），否则候选词窗口(level~25)
+ *   会被高 level 窗口遮挡，导致"能输入中文但看不到候选词"。
  * @returns {boolean} 是否成功
  */
-function applyNativeFloatTop(win) {
+function applyNativeFloatTop(win, level = SCREEN_SAVER_LEVEL) {
   if (!win || win.isDestroyed()) return false
   if (!init()) return false
   try {
@@ -112,7 +111,7 @@ function applyNativeFloatTop(win) {
     // Electron 的 setAlwaysOnTop / setVisibleOnAllWorkspaces 在 macOS
     // Sonoma+ 上偶发不生效，直接调 AppKit 是唯一可靠方案。
     if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, FLOAT_COLLECTION_BEHAVIOR)
-    if (selSetLevel) msg1(nsWindow, selSetLevel, SCREEN_SAVER_LEVEL)
+    if (selSetLevel) msg1(nsWindow, selSetLevel, level)
     // NSWindow 通用属性
     if (selSetHidesOnDeactivate) msg1(nsWindow, selSetHidesOnDeactivate, 0)
     if (selSetCanHide) msg1(nsWindow, selSetCanHide, 0)
@@ -165,7 +164,7 @@ function clearAllSpaces(win) {
     const nsWindow = msg0(nsView, selWindow)
     if (!nsWindow) return false
     const cur = msgLong(nsWindow, selCollectionBehavior) || 0
-    const cleared = cur & ~NSWindowCollectionBehaviorCanJoinAllSpaces
+    const cleared = cur & ~(1 << 0) // 清 CanJoinAllSpaces
     if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, cleared)
     return true
   } catch (_) {
@@ -184,7 +183,7 @@ function clearAllSpaces(win) {
 function setFloatCursor(isHand) {
   if (!init()) return false
   try {
-    const cursor = msg0(clsNSCursor, isHand ? selPointingHandCursor : selArrowCursor)
+    const cursor = msg0(clsNSCursor, isHand ? selClosedHandCursor : selArrowCursor)
     if (!cursor) return false
     msg0(cursor, selSetCursor)
     return true
@@ -193,26 +192,4 @@ function setFloatCursor(isHand) {
   }
 }
 
-/**
- * 设置 NSPanel 的 becomesKeyOnlyIfNeeded（仅需要时成为 key window）。
- * @param {Electron.BrowserWindow} win
- * @param {boolean} flag
- * @returns {boolean} 是否成功
- */
-function setBecomesKeyOnlyIfNeeded(win, flag) {
-  if (!win || win.isDestroyed()) return false
-  if (!init()) return false
-  try {
-    const handle = win.getNativeWindowHandle()
-    if (!handle || handle.length < 8) return false
-    const nsView = handle.readBigUInt64LE()
-    const nsWindow = msg0(nsView, selWindow)
-    if (!nsWindow) return false
-    if (selSetBecomesKeyOnlyIfNeeded) msg1(nsWindow, selSetBecomesKeyOnlyIfNeeded, flag ? 1 : 0)
-    return true
-  } catch (_) {
-    return false
-  }
-}
-
-module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, setBecomesKeyOnlyIfNeeded, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }

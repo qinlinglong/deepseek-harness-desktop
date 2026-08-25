@@ -70,7 +70,7 @@
       "main.js",
       "preload.js",
       "renderer/**",
-      "assets/**",
+      "assets/icons/**",
       "scripts/market.js",
       "scripts/native-float.js",
       "node_modules/**"

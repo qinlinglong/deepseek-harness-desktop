@@ -263,8 +263,8 @@
         </div>
         <div class="field">
           <label>访问密码（远端桌面服务端）</label>
-          <input id="cfgRemotePassword" type="password" placeholder="远端桌面服务访问密码，留空则不填" />
-          <div class="hint">用于远程安装/管理插件：向远端桌面服务验证身份。仅远端为桌面版服务时生效</div>
+          <input id="cfgRemotePassword" type="password" placeholder="远端桌面服务访问密码" />
+          <div class="hint" id="remotePwHint">用于远程安装/管理插件：向远端桌面服务验证身份。仅远端为桌面版服务时生效</div>
         </div>
         <div class="hint">连接本机或其他设备上的服务端；若设置了密码，首次访问需在页面中输入</div>
       </div>
@@ -476,7 +476,10 @@
       $('cfgRemoteHost').value = cfg.remoteHost
       $('cfgRemotePort').value = cfg.remotePort
       $('cfgRemoteScheme').value = cfg.remoteScheme === 'https' ? 'https' : 'http'
-      $('cfgRemotePassword').value = cfg.remotePassword || ''
+      $('cfgRemotePassword').value = ''
+      $('remotePwHint').textContent = cfg.hasRemotePassword
+        ? '已设置远端密码，留空则保持不变；如需修改请重新输入'
+        : '用于远程安装/管理插件：向远端桌面服务验证身份。仅远端为桌面版服务时生效'
       $('cfgPassword').value = ''
       $('pwHint').textContent = cfg.hasPassword
         ? '已设置密码，留空则保持不变；如需修改请重新输入'
