@@ -166,31 +166,6 @@ function revertNativeFloatTop(win) {
 }
 
 /**
- * 清除 NSWindowCollectionBehaviorCanJoinAllSpaces（bit 0）：
- * 取消"跟随所有 Space"，让窗口只在当前桌面显示（对齐豆包"取消置顶=普通窗口"）。
- * 只清除该位、保留其它集合行为；重复调用幂等。
- * @param {Electron.BrowserWindow} win
- * @returns {boolean} 是否成功
- */
-function clearAllSpaces(win) {
-  if (!win || win.isDestroyed()) return false
-  if (!init()) return false
-  try {
-    const handle = win.getNativeWindowHandle()
-    if (!handle || handle.length < 8) return false
-    const nsView = handle.readBigUInt64LE()
-    const nsWindow = msg0(nsView, selWindow)
-    if (!nsWindow) return false
-    const cur = msgLong(nsWindow, selCollectionBehavior) || 0
-    const cleared = cur & ~(1 << 0) // 清 CanJoinAllSpaces
-    if (selSetCollectionBehavior) msg1(nsWindow, selSetCollectionBehavior, cleared)
-    return true
-  } catch (_) {
-    return false
-  }
-}
-
-/**
  * 把迷你窗设为「非激活独立面板」：调 Chromium NativeWidgetMacNSWindow 的
  * setActivationIndependence:，让 _isNonactivatingPanel 返回 YES。配合
  * showMiniInActiveSpace 时，窗口平时不成为 key window、不激活 app（呼出不抢焦点、
@@ -276,4 +251,4 @@ function setFloatCursor(isHand) {
   }
 }
 
-module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, setActivationIndependence, showMiniInActiveSpace, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, setFloatCursor, setActivationIndependence, showMiniInActiveSpace, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
