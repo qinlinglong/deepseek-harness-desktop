@@ -10,6 +10,7 @@ const {
   screen,
   dialog,
   globalShortcut,
+  safeStorage,
 } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
 const net = require('node:net')
@@ -69,7 +70,8 @@ const DEFAULT_CONFIG = {
   remoteHost: '',
   remotePort: 3080,
   remoteScheme: 'http', // 'http' | 'https'
-  remotePassword: '', // 远端桌面 lan 服务的访问密码（用于 /_auth/login 拿 cookie 调 /desktop/*）
+  remotePassword: '', // 远端桌面 lan 服务的访问密码（内存明文；存盘用 remotePasswordEnc 加密）
+  remotePasswordEnc: '', // 远端密码加密密文（safeStorage 加密，不落明文；无 safeStorage 平台回退明文 remotePassword）
   icon: 'deepseek', // 'deepseek' | 'dnee'
   showFloat: true,
   bubblePos: null,
@@ -152,11 +154,59 @@ function configFile() {
   return path.join(app.getPath('userData'), 'config.json')
 }
 
+// 远端密码安全存储：优先用 Electron safeStorage（macOS Keychain / Windows DPAPI /
+// Linux libsecret），存盘为密文 remotePasswordEnc；系统不支持加密（如无密钥环的
+// Linux）时回退明文 remotePassword 字段（保留 0600 权限兜底）。
+function canEncryptSecrets() {
+  try {
+    return !!safeStorage && safeStorage.isEncryptionAvailable()
+  } catch (_) {
+    return false
+  }
+}
+
+function encryptSecret(plain) {
+  if (!plain) return ''
+  if (!canEncryptSecrets()) return ''
+  try {
+    return 'enc:' + safeStorage.encryptString(plain).toString('base64')
+  } catch (_) {
+    return ''
+  }
+}
+
+function decryptSecret(stored) {
+  if (!stored) return ''
+  if (typeof stored !== 'string') return ''
+  if (!stored.startsWith('enc:')) return stored // 旧版明文（等待下次存盘迁移）
+  if (!canEncryptSecrets()) return ''
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'))
+  } catch (_) {
+    return ''
+  }
+}
+
+// 存盘前整理敏感字段：远端密码改为加密密文存储，绝不落明文。
+function prepareConfigForDisk(cfg) {
+  const out = { ...cfg }
+  const plain = String(out.remotePassword || '')
+  const enc = encryptSecret(plain)
+  if (enc) {
+    out.remotePasswordEnc = enc
+    delete out.remotePassword // 密文可用时删除明文
+  } else {
+    delete out.remotePasswordEnc // 无法加密：回退明文 remotePassword
+  }
+  return out
+}
+
 function loadConfig() {
   try {
     const raw = fs.readFileSync(configFile(), 'utf8')
     config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) }
-  } catch (_) {
+  } catch (e) {
+    log('main', `config load failed, using defaults: ${e.message}`)
     config = { ...DEFAULT_CONFIG }
   }
   // 规范化，防止损坏/旧版本配置导致主进程异常（如 lanPort 非数字触发 listen 崩溃）
@@ -165,18 +215,21 @@ function loadConfig() {
   config.remotePort = clampInt(config.remotePort, 1, 65535, DEFAULT_CONFIG.remotePort)
   config.remoteScheme = config.remoteScheme === 'https' ? 'https' : 'http'
   config.remoteHost = String(config.remoteHost || '').replace(/^https?:\/\//, '')
-  config.remotePassword = String(config.remotePassword || '')
+  // 远端密码：优先解密 remotePasswordEnc；无密文则用旧版明文（下次存盘自动迁移）
+  const enc = String(config.remotePasswordEnc || '')
+  const plain = String(config.remotePassword || '')
+  config.remotePassword = decryptSecret(enc) || (enc ? '' : plain)
   if (config.icon === 'gemini') config.icon = 'dnee'
   if (config.icon === 'default' || !ICON_FILES[config.icon]) config.icon = 'deepseek'
   if (typeof config.showFloat !== 'boolean') config.showFloat = true
   config.marketSources = market.normalizeMarketSources(config.marketSources)
-  log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} remote=${sanitizeLog((config.remoteHost || '') + ':' + config.remotePort)}`)
+  log('main', `config: mode=${config.mode} lanPort=${config.lanPort} hasPassword=${!!config.passwordHash} hasRemotePassword=${!!config.remotePassword} remote=${sanitizeLog((config.remoteHost || '') + ':' + config.remotePort)}`)
 }
 
 function saveConfigToDisk() {
   try {
     fs.mkdirSync(app.getPath('userData'), { recursive: true })
-    fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), { mode: 0o600 })
+    fs.writeFileSync(configFile(), JSON.stringify(prepareConfigForDisk(config), null, 2), { mode: 0o600 })
   } catch (e) {
     log('main', `failed to save config: ${e.message}`)
   }
@@ -254,7 +307,12 @@ function normalPrompts(arr) {
 function loadPrompts() {
   if (promptsCache) return promptsCache
   let arr = []
-  try { arr = JSON.parse(fs.readFileSync(promptsFile(), 'utf8')) } catch (_) {}
+  try {
+    arr = JSON.parse(fs.readFileSync(promptsFile(), 'utf8'))
+  } catch (e) {
+    // 首次运行无文件属正常；文件存在但解析失败才告警（避免静默丢用户数据）
+    if (e.code !== 'ENOENT') log('main', `prompts load failed: ${e.message}`)
+  }
   if (!Array.isArray(arr) || arr.length === 0) arr = DEFAULT_PROMPTS
   promptsCache = normalPrompts(arr)
   return promptsCache
@@ -392,6 +450,35 @@ function applyIcon() {
 // ---------------- utils ----------------
 
 let logStream = null
+let logFile = ''
+const LOG_MAX_SIZE = 5 * 1024 * 1024 // 5MB 单文件上限
+const LOG_KEEP = 3 // 保留最近 3 份历史
+let logCheckCount = 0
+
+// 日志轮转：当前日志文件超过上限时，把 .log -> .1.log -> .2.log … 顺延，保留 LOG_KEEP 份。
+function rotateLogIfNeeded() {
+  try {
+    const st = fs.statSync(logFile)
+    if (st.size < LOG_MAX_SIZE) return
+    // 清理最旧的一份（顺延后总量固定）
+    const oldest = path.join(path.dirname(logFile), `dsh-desktop.${LOG_KEEP}.log`)
+    if (fs.existsSync(oldest)) fs.unlinkSync(oldest)
+    for (let i = LOG_KEEP - 1; i >= 1; i--) {
+      const src = path.join(path.dirname(logFile), `dsh-desktop.${i}.log`)
+      if (fs.existsSync(src)) {
+        fs.renameSync(src, path.join(path.dirname(logFile), `dsh-desktop.${i + 1}.log`))
+      }
+    }
+    if (logStream) {
+      try { logStream.end() } catch (_) {}
+      logStream = null
+    }
+    if (fs.existsSync(logFile)) {
+      fs.renameSync(logFile, path.join(path.dirname(logFile), 'dsh-desktop.1.log'))
+    }
+  } catch (_) {}
+}
+
 function log(tag, msg) {
   const line = `[${new Date().toISOString()}] [${tag}] ${String(msg).trimEnd()}`
   console.log(line)
@@ -399,10 +486,12 @@ function log(tag, msg) {
     if (!logStream) {
       const dir = path.join(app.getPath('userData'), 'logs')
       fs.mkdirSync(dir, { recursive: true })
-      const file = path.join(dir, 'dsh-desktop.log')
-      logStream = fs.createWriteStream(file, { flags: 'a' })
+      logFile = path.join(dir, 'dsh-desktop.log')
+      logStream = fs.createWriteStream(logFile, { flags: 'a' })
       logStream.on('error', () => { logStream = null })
     }
+    // 周期性检查大小（每 256 条检查一次，避免高频 stat）
+    if (++logCheckCount % 256 === 0) rotateLogIfNeeded()
     if (logStream) logStream.write(line + '\n')
   } catch (_) {}
 }

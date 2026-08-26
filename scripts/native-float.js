@@ -30,6 +30,8 @@ let initialized = false
 let msg0 = null // objc_msgSend(void*, void*)
 let msg1 = null // objc_msgSend(void*, void*, uint64_t) -> void*
 let msgLong = null // objc_msgSend(void*, void*) -> long long（读属性）
+let msgResponds = null // objc_msgSend(void*, void*, SEL) -> BOOL（respondsToSelector）
+let selRespondsToSelector = null
 let selWindow = null
 let selSetCollectionBehavior = null
 let selCollectionBehavior = null
@@ -55,6 +57,8 @@ function init() {
     const libA = koffi.load('/usr/lib/libobjc.A.dylib')
     msg0 = libA.func('void * objc_msgSend(void *self, void *op)')
     const selReg = libA.func('void * sel_registerName(const char *name)')
+    selRespondsToSelector = selReg('respondsToSelector:')
+    msgResponds = libA.func('long long objc_msgSend(void *self, void *op, void *sel)')
 
     const libB = koffi.load('/usr/lib/libobjc.A.dylib')
     msg1 = libB.func('void * objc_msgSend(void *self, void *op, uint64_t v)')
@@ -82,6 +86,23 @@ function init() {
     return true
   } catch (e) {
     initialized = false
+    return false
+  }
+}
+
+// 探测某 selector 在当前窗口对象上是否真实可用，避免调用私有/跨版本 selector 崩溃。
+// Chromium 的 setActivationIndependence: 是 NativeWidgetMacNSWindow 的实现，
+// 不同 Electron/macOS 版本可能缺失——调用前先探测，缺失则安全回退（不强行 makeKey）。
+function nsWindowResponds(win, sel) {
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow || !msgResponds) return false
+    return !!msgResponds(nsWindow, selRespondsToSelector, sel)
+  } catch (_) {
     return false
   }
 }
@@ -183,6 +204,11 @@ function setActivationIndependence(win, flag) {
   if (!win || win.isDestroyed()) return false
   if (!init()) return false
   try {
+    // 探测 selector 可用性：Chromium 的 setActivationIndependence: 非所有版本都有，
+    // 缺失时返回 false，调用方回退到「纯 panel show」（不主动 makeKey）。
+    if (selSetActivationIndependence && !nsWindowResponds(win, selSetActivationIndependence)) {
+      return false
+    }
     const handle = win.getNativeWindowHandle()
     if (!handle || handle.length < 8) return false
     const nsView = handle.readBigUInt64LE()
@@ -218,7 +244,12 @@ function showMiniInActiveSpace(win) {
     const nsView = handle.readBigUInt64LE()
     const nsWindow = msg0(nsView, selWindow)
     if (!nsWindow) return false
-    if (selMakeKeyAndOrderFront) msg1(nsWindow, selMakeKeyAndOrderFront, 0)
+    // 仅在 selector 可用时才主动 makeKey（成为 key window 让候选词弹出）；
+    // 缺失时保留 panel show 的默认行为（不抢焦点、不激活 app），候选词依赖
+    // 用户点击输入框自然聚焦，避免调用不存在的 selector 崩溃。
+    if (selMakeKeyAndOrderFront && nsWindowResponds(win, selMakeKeyAndOrderFront)) {
+      msg1(nsWindow, selMakeKeyAndOrderFront, 0)
+    }
     return true
   } catch (_) {
     return false

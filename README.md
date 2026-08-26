@@ -115,12 +115,14 @@
 
 > ⚠ 局域网模式下，任何知道密码的设备都能操作本机 Agent 并执行命令。请设置高强度密码，仅在可信网络使用。
 
+> 远端访问密码（局域网连接模式）通过 Electron safeStorage 加密存储（macOS Keychain / Windows DPAPI / Linux libsecret），config.json 不落明文；系统不支持加密时回退明文并保留 0600 权限。局域网密码本身以 scrypt 哈希存储。
+
 ## 数据与配置
 
 - 用户数据：`~/.dsh`（dsh 的 harness home，含 profiles / 会话 / 凭据）
 - 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希、市场源、窗口位置）
 - 快捷指令：`<userData>/prompts.json`
-- 日志：`<userData>/logs/dsh-desktop.log`
+- 日志：`<userData>/logs/dsh-desktop.log`（自动轮转，单文件 5MB，保留最近 3 份）
 - 配置目录：
   - macOS: `~/Library/Application Support/dsh-desktop/`
   - Windows: `%APPDATA%/dsh-desktop/`

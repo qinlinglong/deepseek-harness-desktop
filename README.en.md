@@ -115,12 +115,14 @@ LAN access is protected by two layers:
 
 > ⚠ In LAN mode, any device knowing the password can operate the local Agent and run commands. Use a strong password and only on trusted networks.
 
+> The remote access password (LAN Connect mode) is stored encrypted via Electron `safeStorage` (macOS Keychain / Windows DPAPI / Linux libsecret); `config.json` never holds it in plaintext. If the system has no encryption backend, it falls back to plaintext with `0600` permissions. The LAN server password itself is stored as a scrypt hash.
+
 ## Data & Config
 
 - User data: `~/.dsh` (dsh harness home: profiles / sessions / credentials)
 - App config: `<userData>/config.json` (mode, LAN port, password hash, market sources, window bounds)
 - Quick prompts: `<userData>/prompts.json`
-- Logs: `<userData>/logs/dsh-desktop.log`
+- Logs: `<userData>/logs/dsh-desktop.log` (auto-rotating, 5MB per file, keeps last 3)
 - Config directory:
   - macOS: `~/Library/Application Support/dsh-desktop/`
   - Windows: `%APPDATA%/dsh-desktop/`

@@ -68,6 +68,7 @@ function staticChecks() {
   check('渲染层按远端能力置灰安装按钮', idxHtml.includes("远端不可装"))
   // 原生置顶可撤销（取消置顶在 macOS 生效）
   const nativeFloatSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'native-float.js'), 'utf8')
+  const marketSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'market.js'), 'utf8')
   check('native-float 导出 revertNativeFloatTop', nativeFloatSrc.includes('function revertNativeFloatTop') && nativeFloatSrc.includes('revertNativeFloatTop'))
   check('main 取消置顶撤销原生层级', mainSrc.includes('revertNativeFloatTop'))
   check('悬浮球菜单含隐藏项', mainSrc.includes("label: '隐藏悬浮球'"))
@@ -91,6 +92,15 @@ function staticChecks() {
   } catch (e) {
     check('renderer/index.html 内联脚本语法合法', false, String(e && e.message))
   }
+  // 生产级加固：远端密码加密存储（不落明文）、日志轮转、HTTP 响应体上限、selector 探测回退
+  check('远端密码 safeStorage 加密存储', mainSrc.includes('safeStorage') && mainSrc.includes('prepareConfigForDisk') && mainSrc.includes('remotePasswordEnc') && !/remotePassword:\s*String\(config\.remotePassword/.test(mainSrc))
+  check('日志轮转已实现', mainSrc.includes('rotateLogIfNeeded') && mainSrc.includes('LOG_MAX_SIZE'))
+  check('市场 HTTP 响应体上限', marketSrc.includes('maxBytes') && marketSrc.includes('response too large'))
+  check('原生桥接 respondsToSelector 探测回退', nativeFloatSrc.includes('respondsToSelector') && nativeFloatSrc.includes('nsWindowResponds'))
+  // 依赖声明完整性：直接 require 的第三方包必须显式声明，避免升级 dsh 后断链
+  const pkgDeps = Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).dependencies || {})
+  check('js-yaml 已声明为直接依赖', pkgDeps.includes('js-yaml'))
+  check('koffi 已声明为直接依赖', pkgDeps.includes('koffi'))
 }
 
 // ---------- 插件市场解析检查（离线，喂样本文件，走声明式引擎） ----------

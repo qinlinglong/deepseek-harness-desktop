@@ -120,11 +120,12 @@ function normalizeMarketSources(arr) {
   return out.length ? out : DEFAULT_MARKET_SOURCES.map((s) => ({ ...s }))
 }
 
-// ---------------- 最小 HTTP GET（跟随重定向 + 超时） ----------------
+// ---------------- 最小 HTTP GET（跟随重定向 + 超时 + 响应体上限） ----------------
 function httpGetText(url, opts = {}) {
   return new Promise((resolve, reject) => {
     const timeout = opts.timeout || 20000
     const maxRedirects = opts.maxRedirects != null ? opts.maxRedirects : 5
+    const maxBytes = opts.maxBytes != null ? opts.maxBytes : 32 * 1024 * 1024 // 默认 32MB
     let redirects = 0
     const doReq = (u) => {
       let parsed
@@ -138,7 +139,16 @@ function httpGetText(url, opts = {}) {
           return doReq(new URL(res.headers.location, u).toString())
         }
         const chunks = []
-        res.on('data', (c) => chunks.push(c))
+        let total = 0
+        res.on('data', (c) => {
+          total += c.length
+          if (total > maxBytes) {
+            req.destroy(new Error('response too large (' + total + ' bytes > ' + maxBytes + ')'))
+            return
+          }
+          chunks.push(c)
+        })
+        res.on('error', () => reject(new Error('response stream error')))
         res.on('end', () => resolve({ status: code, body: Buffer.concat(chunks).toString('utf8') }))
       })
       req.on('error', reject)
