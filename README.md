@@ -50,10 +50,28 @@
 
 - 顶部工具栏：打开主窗口 / 置顶切换 / 收起
 - 始终置顶可选，配合悬浮球使用，随时呼出随时收起
+- 呼出时不抢占系统焦点、不切换 Space；输入中文时输入法候选词正常显示
 
 <div align="center">
   <img src="assets/dsh-pic-悬浮图标和迷你窗口.jpg" width="560" />
 </div>
+
+### 划词即问
+
+在应用内任意选中文本，右键选择「用 DeepSeek 提问」，即可作为新会话提问。
+
+### 快捷指令 / 提词器
+
+内置总结全文、解释代码、优化重构、修复 Bug、翻译等常用指令，可在设置中自由增删；迷你窗顶部按钮随时呼出，一键填入提问。
+
+### 插件市场
+
+应用内置插件市场，浏览、安装、卸载 deepseek-harness 插件：
+
+- **多市场源**：内置 dsh.market、awesome-dsh-plugin.com，支持自定义源（JSON/HTML 声明式描述符）
+- **应用内安装**：打包内置 pnpm 与 Node 运行时，无需系统 Node/pnpm，即可从淘宝镜像安装插件
+- **远程安装**：局域网连接模式下，可向远端桌面服务远程安装/卸载插件（需远端开启局域网服务端并填写密码）
+- **兼容检查**：安装前自动校验插件与内置 SDK 的版本兼容性，避免装出不兼容插件
 
 ### 应用图标切换
 
@@ -74,6 +92,14 @@
 > - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
 > - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
 
+## 全局快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Cmd/Ctrl+Shift+D` | 打开/聚焦主窗口 |
+| `Alt+D` | 切换迷你聊天窗 |
+| `Alt+S` | 切换悬浮球显隐 |
+
 ## 平台注意事项
 
 - **Windows**：安装包未签名，首次运行可能提示「Windows 已保护你的电脑」，选择「更多信息 → 仍要运行」即可。Agent 部分工具依赖 bash 环境，**建议安装 [Git for Windows](https://git-scm.com/download/win)（自带 Git Bash）**，否则部分工具（如终端/bash 命令）可能不可用。
@@ -92,7 +118,9 @@
 ## 数据与配置
 
 - 用户数据：`~/.dsh`（dsh 的 harness home，含 profiles / 会话 / 凭据）
-- 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希）
+- 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希、市场源、窗口位置）
+- 快捷指令：`<userData>/prompts.json`
+- 日志：`<userData>/logs/dsh-desktop.log`
 - 配置目录：
   - macOS: `~/Library/Application Support/dsh-desktop/`
   - Windows: `%APPDATA%/dsh-desktop/`
@@ -103,6 +131,7 @@
 ```bash
 npm install
 npm start            # 开发模式启动
+npm run smoke        # 冒烟测试（静态检查 + 服务启动 + DOM 渲染）
 ```
 
 > ⚠ 维护提示：`@deepseek-ai/*` 的 **peerDependencies** 不会被 electron-builder 自动打包，
@@ -111,7 +140,7 @@ npm start            # 开发模式启动
 > `ERR_MODULE_NOT_FOUND`，对照 dev 环境补齐缺失的 peer 依赖即可。
 > 当前内置 **`@deepseek-ai/dsh@0.1.0-rc.8`**（及全部 `dsh-*` 子包同版本）。升级 harness
 > 后注意 web UI 结构变化：`scripts/dump-dom.js` 与 `main.js` 的 `MINI_CSS` 均按 rc.8 的
-> `data-slot` 语义（`sidebar` / `details`）适配，旧版 `[class$="_frame"]` 网格规则已移除。
+> `data-slot` 语义（`sidebar` / `details`）适配。
 
 ## 打包
 
@@ -132,22 +161,24 @@ npm start            # 开发模式启动
 打 `v*` tag 推送到 GitHub 即触发三平台 CI 构建，并自动创建 GitHub Release 上传三平台安装包（构建成功即自动发布，无需手动确认）。
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.4 && git push origin v0.1.4
 ```
 
 ## 目录结构
 
 ```
-main.js               Electron 主进程：服务编排、局域网反代、鉴权、悬浮球/迷你窗
-preload.js            渲染进程桥接
-renderer/index.html   启动页 + 连接设置界面
-renderer/floating.*   桌面悬浮球
-renderer/mini.*       迷你聊天窗口（webview + 顶部按钮栏）
-assets/icons/         应用图标（DeepSeek（默认）/ D娘）
-assets/               界面截图（README 配图）
-build/                打包用图标
-scripts/gen-icon.mjs  图标生成脚本
+main.js                Electron 主进程：服务编排、局域网反代、鉴权、悬浮球/迷你窗、插件安装
+preload.js             主窗口渲染进程桥接（仅 file: 页面暴露，防止远端页面滥用本机能力）
+renderer/index.html    启动页 + 连接设置 + 插件市场界面
+renderer/floating.*    桌面悬浮球（拖动/点击/右键菜单）
+renderer/mini.*        迷你聊天窗口（webview + 顶部按钮栏 + 快捷指令）
+scripts/native-float.js macOS 原生桥接（koffi + AppKit：悬浮球置顶、迷你窗候选词方案）
+scripts/market.js      插件市场声明式解析引擎 + pnpm 自包含安装器
+scripts/smoke.cjs      冒烟测试（静态检查/服务启动/DOM 渲染/PNPM 自包含）
 scripts/verify-native.mjs  校验打包产物原生模块齐全（CI 使用）
+assets/icons/          应用图标（DeepSeek（默认）/ D娘）
+assets/                界面截图（README 配图）
+build/                 打包用图标
 .github/workflows/build.yml  三平台矩阵构建工作流
 ```
 

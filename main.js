@@ -352,11 +352,9 @@ function setupSelectionAsk(webContents) {
 
 function runPromptFast(text) {
   const sel = String(text || '')
-  if (!miniWin || miniWin.isDestroyed()) createMiniWindow(true)
+  if (!miniWin || miniWin.isDestroyed()) createMiniWindow()
   else {
-    reapplyMiniTop()
-    miniWin.show()
-    miniWin.focus()
+    showMini()
   }
   // 渲染端在 view 就绪后注入并填入
   try { miniWin.webContents.send('mini:run-prompt', sel) } catch (_) {}
@@ -2068,52 +2066,36 @@ function sendMiniUrl() {
   if (url) miniWin.webContents.send('mini:url', url)
 }
 
-// 迷你窗置顶（豆包同款 NSPanel + collectionBehavior）。
-// miniPinned=true 时置顶并跨 Space，false 时恢复普通窗口。
-// 注意：迷你窗是聊天窗口，必须能接收输入法候选词。候选词窗口 level 约 25
-// （NSStatusWindowLevel），若迷你窗 level 设为 27（screen-saver 级）会遮挡候选词，
-// 表现为"能打中文但看不到待选词"。故迷你窗用 NSFloatingWindowLevel(3)：
-// 既在普通窗口(0)之上置顶，又低于候选词窗口(25)。
-const MINI_FLOAT_LEVEL = 3 // NSFloatingWindowLevel
+// 迷你窗置顶与 Space 行为。
+// 迷你窗用 ElectronNSPanel(type:'panel')：show() 走 panel 分支「makeKeyAndOrderFront
+// 但不 activateIgnoringOtherApps」，因此呼出时不激活 app、不切回桌面主窗口 Space。
+// 配合 setActivationIndependence(true)：窗口平时不成为 key（不抢焦点、不激活 app），
+// show 后再 makeKeyAndOrderFront 成为 key window → 输入法候选词可弹出（豆包
+// NSPanel + becomesKeyOnlyIfNeeded 的等效实现）。
 function reapplyMiniTop() {
   if (!miniWin || miniWin.isDestroyed()) return
   try {
-    if (miniPinned) {
-      miniWin.setAlwaysOnTop(true, 'floating')
-      if (isMac) {
-        miniWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-        if (nativeFloatTop) {
-          nativeFloatTop.applyNativeFloatTop(miniWin, MINI_FLOAT_LEVEL)
-        }
-      }
-    } else {
-      miniWin.setAlwaysOnTop(false)
-      if (isMac) {
-        try { miniWin.setVisibleOnAllWorkspaces(false) } catch (_) {}
-        if (nativeFloatTop) {
-          nativeFloatTop.revertNativeFloatTop(miniWin)
-          clearAllSpacesSafely(miniWin)
-        }
-      }
+    miniWin.setAlwaysOnTop(miniPinned)
+    if (isMac && nativeFloatTop) {
+      nativeFloatTop.setActivationIndependence(miniWin, true)
     }
   } catch (_) {}
 }
 
-// 迷你窗定位到悬浮球附近（豆包同款）：优先悬浮球上方，空间不足回退下方；
-// 水平右对齐悬浮球，超出屏幕则贴边。
-// 清除窗口的"跟随所有 Space"行为（取消置顶时调用）。
-// Electron 的 setVisibleOnAllWorkspaces(false) 对 panel 是异步生效的，
-// 完成后会回填 CanJoinAllSpaces（行为：取消置顶后仍跨桌面）。
-// 因此立即清一次 + 400ms 后再清一次，保证最终状态只留在当前桌面。
-function clearAllSpacesSafely(win) {
-  if (!win || win.isDestroyed() || !nativeFloatTop) return
-  nativeFloatTop.clearAllSpaces(win)
-  setTimeout(() => {
-    if (!win || win.isDestroyed()) return
-    nativeFloatTop.clearAllSpaces(win)
-  }, 400)
+// 以不激活 app 的方式显示迷你窗并成为 key window（候选词可弹出）。
+// panel 的 show() 不 activateIgnoringOtherApps，配合 makeKey 成为 key window。
+function showMini() {
+  if (!miniWin || miniWin.isDestroyed()) return
+  reapplyMiniTop()
+  if (isMac && nativeFloatTop) {
+    nativeFloatTop.showMiniInActiveSpace(miniWin)
+  } else {
+    miniWin.show()
+  }
 }
 
+// 迷你窗定位到悬浮球附近（豆包同款）：优先悬浮球上方，空间不足回退下方；
+// 水平右对齐悬浮球，超出屏幕则贴边。
 function positionMiniNearFloat() {
   if (!miniWin || miniWin.isDestroyed()) return
   if (!floatWin || floatWin.isDestroyed()) return
@@ -2139,12 +2121,8 @@ function toggleMini() {
   } else if (miniWin.isVisible()) {
     miniWin.hide()
   } else {
-    reapplyMiniTop()
     positionMiniNearFloat()
-    // panel 的 show() 会 makeKeyAndOrderFront 成为 key window（输入法候选词
-    // 可弹出），但因 ElectronNSPanel 自带 NonactivatingPanel 掩码，不会激活
-    // app、不会切换 Space（豆包/Spotlight 同款行为）。
-    miniWin.show()
+    showMini()
     sendMiniUrl()
   }
 }
@@ -2425,34 +2403,24 @@ function setupMiniCssInjection(win) {
   })
 }
 
-function createMiniWindow(focusAfterShow = false) {
+function createMiniWindow() {
   if (miniWin && !miniWin.isDestroyed()) {
-    // 已存在：panel 的 show() 不激活 app 但成为 key window（输入法候选词可用）
-    if (focusAfterShow) {
-      miniWin.show()
-      miniWin.focus()
-    } else {
-      miniWin.show()
-    }
+    // 已存在：showMini() 用 panel 的 show()（makeKeyAndOrderFront 但不激活 app）
+    // 成为 key window、不切 Space（候选词可弹出）
+    showMini()
     return
   }
   // 复用预热窗口（如果存在且未销毁），消除首屏白屏
   if (_warmupMiniWin && !_warmupMiniWin.isDestroyed()) {
     miniWin = _warmupMiniWin
     _warmupMiniWin = null
-    reapplyMiniTop()
     // 关键修复：预热窗口的 mini.html 早已 did-finish-load，不能再用 once('did-finish-load')
     // 等 finish 再 sendMiniUrl，否则永远不会触发。改为立即 sendMiniUrl，并确保 mini:pin
     // 也已发送（mini.html 加载时已 send pin 一次但 miniPinned 可能在预热后被改）。
     miniWin.webContents.send('mini:pin', miniPinned)
     sendMiniUrl()
     positionMiniNearFloat()
-    if (focusAfterShow) {
-      miniWin.show()
-      miniWin.focus()
-    } else {
-      miniWin.show()
-    }
+    showMini()
     // resize 持久化（与下方新建路径一致）
     let saveMiniTimer = null
     const saveMiniBounds = () => {
@@ -2489,7 +2457,6 @@ function createMiniWindow(focusAfterShow = false) {
     alwaysOnTop: miniPinned,
     backgroundColor: '#0b0d16',
     title: APP_TITLE,
-    // macOS 用 NSPanel（豆包 chat_window 同款），全屏 Space 下置顶且不抢主应用焦点
     ...(isMac ? { type: 'panel' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'renderer', 'mini-preload.js'),
@@ -2501,14 +2468,8 @@ function createMiniWindow(focusAfterShow = false) {
   })
   miniWin.loadFile(path.join(__dirname, 'renderer', 'mini.html'))
   miniWin.once('ready-to-show', () => {
-    reapplyMiniTop()
     positionMiniNearFloat()
-    if (focusAfterShow) {
-      miniWin.show()
-      miniWin.focus()
-    } else {
-      miniWin.show()
-    }
+    showMini()
   })
   // 迷你窗尺寸变化时持久化（防抖 600ms）
   let saveMiniTimer = null
@@ -2565,13 +2526,11 @@ function registerGlobalShortcuts() {
   const ok2 = globalShortcut.register('Alt+D', () => {
     // 迷你聊天窗：开/关切换。快捷键呼出需要获得焦点（可立即输入）
     if (!miniWin || miniWin.isDestroyed()) {
-      createMiniWindow(true)
+      createMiniWindow()
     } else if (miniWin.isVisible()) {
       miniWin.hide()
     } else {
-      reapplyMiniTop()
-      miniWin.show()
-      miniWin.focus()
+      showMini()
       sendMiniUrl()
     }
   })

@@ -12,7 +12,7 @@ let koffi = null
 
 // macOS collectionBehavior 位（NSWindow.h）
 // 注意：ElectronNSPanel(type:'panel') 的 setCollectionBehavior: 会自动 OR 上
-// CanJoinAllSpaces | FullScreenAuxiliary，因此这里只需补充 IgnoresCycle，
+// CanJoinAllSpaces | FullScreenAuxiliary，因此悬浮球（NSPanel）只补 IgnoresCycle，
 // 不要设置 MoveToActiveSpace（与 CanJoinAllSpaces 互斥，会导致 AppKit 异常）。
 const NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8 // 256
 const NSWindowCollectionBehaviorIgnoresCycle = 1 << 6 // 64
@@ -37,8 +37,8 @@ let selSetLevel = null
 let selSetHidesOnDeactivate = null
 let selSetExcludedFromWindowsMenu = null
 let selSetCanHide = null
-let selSetHasShadow = null
-let selDisableVideoOpacitySafe = null
+let selSetActivationIndependence = null
+let selMakeKeyAndOrderFront = null
 
 
 // NSCursor（悬浮球拖动时强制手型，参考豆包拖动交互）
@@ -61,11 +61,6 @@ function init() {
     // 读 long long 属性（collectionBehavior / level），arm64 上返回值在 rax，可用 long long 签名读取
     msgLong = libB.func('long long objc_msgSend(void *self, void *op)')
 
-    // 之前尝试用 object_setClass 把 NSWindow → NSPanel 升级，但 NSPanel
-    // 比 NSWindow 多 ivar，反父子类化导致 SIGTRAP 崩溃。不安全，已移除。
-    // 改回纯 NSWindow API + setHidesOnDeactivate:NO 等，让 macOS 把窗口
-    // 视为"非激活辅助窗口"进入全屏 Space。
-
     selWindow = selReg('window')
     selSetCollectionBehavior = selReg('setCollectionBehavior:')
     selCollectionBehavior = selReg('collectionBehavior')
@@ -73,6 +68,8 @@ function init() {
     selSetHidesOnDeactivate = selReg('setHidesOnDeactivate:')
     selSetExcludedFromWindowsMenu = selReg('setExcludedFromWindowsMenu:')
     selSetCanHide = selReg('setCanHide:')
+    selSetActivationIndependence = selReg('setActivationIndependence:')
+    selMakeKeyAndOrderFront = selReg('makeKeyAndOrderFront:')
 
     // NSCursor：拖动悬浮球期间强制手型光标（拖动窗口频繁 setPosition 时
     // Chromium 的重绘可能把 CSS cursor 重置为默认箭头，原生 set 保证手型）
@@ -173,6 +170,62 @@ function clearAllSpaces(win) {
 }
 
 /**
+ * 把迷你窗设为「非激活独立面板」：调 Chromium NativeWidgetMacNSWindow 的
+ * setActivationIndependence:，让 _isNonactivatingPanel 返回 YES。配合
+ * showMiniInActiveSpace 时，窗口平时不成为 key window、不激活 app（呼出不抢焦点、
+ * 不切 Space），需要输入时再 makeKeyAndOrderFront 成为 key window（候选词弹出）。
+ * 这是豆包 chat_window 用 NSPanel + becomesKeyOnlyIfNeeded 的等效实现。
+ * @param {Electron.BrowserWindow} win
+ * @param {boolean} flag
+ * @returns {boolean} 是否成功
+ */
+function setActivationIndependence(win, flag) {
+  if (!win || win.isDestroyed()) return false
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow) return false
+    if (selSetActivationIndependence) msg1(nsWindow, selSetActivationIndependence, flag ? 1 : 0)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+/**
+ * 以「不激活 app」的方式显示迷你窗并让它成为 key window。
+ * 迷你窗是 ElectronNSPanel(type:'panel')：Electron 的 Show() 对 panel 走
+ * "makeKeyAndOrderFront 但不 activateIgnoringOtherApps" 分支（源码
+ * NativeWindowMac::Show: if (!IsPanel()) activateIgnoringOtherApps）。因此
+ * win.show() 不激活 app、不切 Space。配合 setActivationIndependence(true) 后，
+ * show() 不会抢 key（不激活 app），再手动 makeKeyAndOrderFront 让它成为 key
+ * window（输入法候选词可弹出）。这是豆包 becomesKeyOnlyIfNeeded 的等效行为。
+ * @param {Electron.BrowserWindow} win
+ * @returns {boolean} 是否成功
+ */
+function showMiniInActiveSpace(win) {
+  if (!win || win.isDestroyed()) return false
+  try {
+    win.show()
+  } catch (_) {}
+  if (!init()) return false
+  try {
+    const handle = win.getNativeWindowHandle()
+    if (!handle || handle.length < 8) return false
+    const nsView = handle.readBigUInt64LE()
+    const nsWindow = msg0(nsView, selWindow)
+    if (!nsWindow) return false
+    if (selMakeKeyAndOrderFront) msg1(nsWindow, selMakeKeyAndOrderFront, 0)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+/**
  * 强制系统光标为"手型"或"默认箭头"。
  * 必须在主进程主线程调用（objc_msgSend 限制）。箭头光标惰性初始化，
  * 需 NSApp 已存在（Electron 主进程总是满足，纯 node 进程会返回空）。
@@ -192,4 +245,4 @@ function setFloatCursor(isHand) {
   }
 }
 
-module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
+module.exports = { applyNativeFloatTop, revertNativeFloatTop, clearAllSpaces, setFloatCursor, setActivationIndependence, showMiniInActiveSpace, FLOAT_COLLECTION_BEHAVIOR, SCREEN_SAVER_LEVEL: 27 }
