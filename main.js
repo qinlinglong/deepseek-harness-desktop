@@ -564,13 +564,20 @@ function ensureGlobalPnpm() {
 }
 
 let _shimDir = null
-function pluginEnv(homeDir) {
+// 确保 pnpm 垫片已构建（幂等），返回 shim 目录。垫片让 dsh 服务进程/子进程
+// 无需系统 pnpm 即可在 PATH 上找到 pnpm（打包内置的 pnpm 经 ELECTRON_RUN_AS_NODE 运行）。
+function ensurePnpmShims() {
   if (!_shimDir) {
     _shimDir = path.join(app.getPath('userData'), 'shims')
     const pnpmBin = ensureGlobalPnpm()
     market.buildPnpmShims(_shimDir, process.execPath, pnpmBin)
   }
-  return market.pnpmEnv(_shimDir, homeDir, PKG_REGISTRY)
+  return _shimDir
+}
+
+function pluginEnv(homeDir) {
+  const shimDir = ensurePnpmShims()
+  return market.pnpmEnv(shimDir, homeDir, PKG_REGISTRY)
 }
 
 function pnpmProfilePaths() {
@@ -778,9 +785,19 @@ function spawnServer(port) {
   const args = ['--expose-internals', bin, 'web', '--host', '127.0.0.1', '--port', String(port), '--no-open']
   for (const ip of lanIPv4s()) args.push('--trusted-host', ip)
   log('main', `spawn dsh ${dshVersion} at http://127.0.0.1:${port} (cwd=${cwd}) trustedHosts=${lanIPv4s().join(',')}`)
+  // 关键：把 pnpm 垫片目录前置到 PATH，否则 dsh 服务进程（含其 web UI 里的
+  // 插件卸载入口）spawnSync("pnpm") 会报 "pnpm not found on PATH"。
+  // 打包环境无系统 pnpm，垫片让 dsh 用内置 pnpm（ELECTRON_RUN_AS_NODE）。
+  let serverEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  try {
+    const shimDir = ensurePnpmShims()
+    serverEnv = { ...serverEnv, PATH: shimDir + path.delimiter + (serverEnv.PATH || '') }
+  } catch (e) {
+    log('main', `ensurePnpmShims failed: ${e.message}`)
+  }
   const child = spawn(process.execPath, args, {
     cwd,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    env: serverEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   })

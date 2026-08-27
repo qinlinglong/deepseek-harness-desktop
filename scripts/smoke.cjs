@@ -46,6 +46,7 @@ function staticChecks() {
   check('MINI_CSS 含压平 frame 左侧空白列规则', mainSrc.includes('[class$="_frame"]') && /grid-template-columns:\s*0px/.test(mainSrc))
   check('MINI_CSS 使用 data-slot 语义', mainSrc.includes('[data-slot="sidebar"]') && mainSrc.includes('[data-slot="details"]'))
   check('spawn 带 --no-open（启动不自动开网页）', /\x27--no-open\x27/.test(mainSrc))
+  check('spawnServer 注入 pnpm 垫片 PATH（dsh 网页卸载插件不再报 pnpm not found）', mainSrc.includes('ensurePnpmShims') && /spawnServer[\s\S]*?PATH: shimDir/.test(mainSrc))
   check('快捷指令 data/IPC 已实现', mainSrc.includes('DEFAULT_PROMPTS') && mainSrc.includes('dsh:get-prompts') && mainSrc.includes('mini:run-prompt'))
   check('划词唤起已实现', mainSrc.includes('setupSelectionAsk') && mainSrc.includes('params.selectionText') && mainSrc.includes('askWithSelection'))
   const miniSrc = fs.readFileSync(path.join(ROOT, 'renderer/mini.html'), 'utf8') + fs.readFileSync(path.join(ROOT, 'renderer/mini.js'), 'utf8')
