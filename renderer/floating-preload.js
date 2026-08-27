@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('dshFloat', {
   showMenu: () => ipcRenderer.send('float:menu'),
   quit: () => ipcRenderer.send('float:quit'),
   onIcon: (cb) => ipcRenderer.on('float:icon', (_e, url) => cb(url)),
+  onPing: () => ipcRenderer.on('float:ping', () => ipcRenderer.send('float:pong')),
 })

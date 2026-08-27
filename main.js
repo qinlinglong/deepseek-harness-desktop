@@ -2026,13 +2026,35 @@ function reapplyFloatTop() {
 //   2) 监听 display-metrics-changed（macOS 全屏进出会隐藏菜单栏/Dock，
 //      改变显示器可用区域），触发时立即重应用并回到最前。
 let floatTopWatch = null
+// 悬浮球 renderer 心跳：lastFloatPong 记录最近一次 pong 时间。
+// 悬浮球是透明 NSPanel，长时间运行后渲染进程可能"卡死但保留最后一帧"，
+// 此时点击不再触发 IPC（迷你窗出不来），render-process-gone 也不触发。
+// 心跳超时即销毁并重建悬浮球自愈。
+let lastFloatPong = 0
+const FLOAT_PING_INTERVAL_MS = 1500
+const FLOAT_PING_TIMEOUT_MS = 5000
+
+function rebuildFloatWindow(reason) {
+  log('main', `rebuild float window: ${reason}`)
+  const shouldRestore = config.showFloat
+  try { if (floatWin && !floatWin.isDestroyed()) floatWin.destroy() } catch (_) {}
+  floatWin = null
+  lastFloatPong = 0
+  if (shouldRestore) setTimeout(() => createFloatWindow(), 300)
+}
 
 function startFloatTopWatch() {
   stopFloatTopWatch()
   floatTopWatch = setInterval(() => {
     if (!floatWin || floatWin.isDestroyed()) return
     if (floatWin._floatOnTop !== false) reapplyFloatTop()
-  }, 1500)
+    // 心跳：超过阈值未收到 pong 视为 renderer 卡死，重建悬浮球
+    if (lastFloatPong && Date.now() - lastFloatPong > FLOAT_PING_TIMEOUT_MS) {
+      rebuildFloatWindow('heartbeat timeout')
+      return
+    }
+    try { floatWin.webContents.send('float:ping') } catch (_) {}
+  }, FLOAT_PING_INTERVAL_MS)
   if (floatTopWatch.unref) floatTopWatch.unref()
 }
 
@@ -2153,6 +2175,12 @@ function createFloatWindow() {
     floatWin = null
     if (shouldRestore) setTimeout(() => createFloatWindow(), 300)
   })
+  // 渲染进程卡死（unresponsive，无崩溃）时同样自愈：卡死的 renderer 点击
+  // 不触发 IPC，迷你窗会"点不出来"，必须销毁重建。
+  floatWin.webContents.on('unresponsive', () => {
+    if (!floatWin || floatWin.isDestroyed()) return
+    rebuildFloatWindow('unresponsive')
+  })
 
   floatWin.on('closed', () => {
     stopFloatTopWatch()
@@ -2200,6 +2228,14 @@ function showMini() {
   reapplyMiniTop()
   if (isMac && nativeFloatTop) {
     nativeFloatTop.showMiniInActiveSpace(miniWin)
+    // 防御：native 链路（makeKeyAndOrderFront）某次失败时，回退 Electron show
+    // 兜底，避免迷你窗"点不出来"。
+    setTimeout(() => {
+      if (miniWin && !miniWin.isDestroyed() && !miniWin.isVisible()) {
+        log('main', 'showMini fallback: native show 未生效，回退 Electron show()')
+        try { miniWin.show() } catch (_) {}
+      }
+    }, 120)
   } else {
     miniWin.show()
   }
@@ -2271,7 +2307,12 @@ function registerIpc() {
     // 恢复默认箭头光标，避免影响其他窗口
     if (nativeFloatTop && process.platform === 'darwin') nativeFloatTop.setFloatCursor(false)
   })
-  ipcMain.on('float:toggle-mini', () => toggleMini())
+  ipcMain.on('float:toggle-mini', () => {
+    const alive = miniWin && !miniWin.isDestroyed()
+    log('main', `float:toggle-mini miniWin=${alive ? 'exists' : 'null'} visible=${alive ? miniWin.isVisible() : '-'}`)
+    toggleMini()
+  })
+  ipcMain.on('float:pong', () => { lastFloatPong = Date.now() })
   ipcMain.on('float:menu', () => showFloatMenu())
   ipcMain.on('float:quit', () => {
     isQuitting = true

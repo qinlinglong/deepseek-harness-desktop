@@ -41,6 +41,9 @@
       if (url) b.style.setProperty('--bubble-icon', `url(${url})`)
     })
 
+    // 心跳回执：主进程定期 ping，渲染进程卡死时主进程据此重建悬浮球
+    window.dshFloat.onPing()
+
     let held = false
     let dragged = false
     let startX = 0
