@@ -2423,6 +2423,15 @@ function registerIpc() {
     }
     const { pnpmBin, profileDir } = pnpmProfilePaths()
     const env = pluginEnv(app.getPath('home'))
+    // 必需 bundle 不可卸载：dsh.profile.bundles 在 boot 时必须解析，卸载后
+    // 服务启动直接失败（cannot resolve profile bundle）。
+    try {
+      const profilePkg = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8'))
+      const bundles = profilePkg && profilePkg.dsh && profilePkg.dsh.profile && profilePkg.dsh.profile.bundles
+      if (Array.isArray(bundles) && bundles.includes(String(pkg))) {
+        return { ok: false, log: '「' + String(pkg) + '」是桌面版内置必需组件，不可卸载。\n如需停用其功能，请到对应功能设置中关闭。' }
+      }
+    } catch (_) {}
     const r = await market.runPnpm(pnpmBin, profileDir, ['remove', String(pkg)], env)
     if (r.code === 0) {
       await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], env)
