@@ -2423,18 +2423,20 @@ function registerIpc() {
     }
     const { pnpmBin, profileDir } = pnpmProfilePaths()
     const env = pluginEnv(app.getPath('home'))
-    // 必需 bundle 不可卸载：dsh.profile.bundles 在 boot 时必须解析，卸载后
-    // 服务启动直接失败（cannot resolve profile bundle）。
-    try {
-      const profilePkg = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8'))
-      const bundles = profilePkg && profilePkg.dsh && profilePkg.dsh.profile && profilePkg.dsh.profile.bundles
-      if (Array.isArray(bundles) && bundles.includes(String(pkg))) {
-        return { ok: false, log: '「' + String(pkg) + '」是桌面版内置必需组件，不可卸载。\n如需停用其功能，请到对应功能设置中关闭。' }
-      }
-    } catch (_) {}
+    const profilePkgPath = path.join(profileDir, 'package.json')
     const r = await market.runPnpm(pnpmBin, profileDir, ['remove', String(pkg)], env)
     if (r.code === 0) {
       await market.runDshPlugin(dshBinPath(), app.getPath('home'), ['remove', String(pkg)], env)
+      // 若该包是必需 bundle，需同步从 dsh.profile.bundles 移除引用，
+      // 否则 boot 仍尝试解析已卸载的 bundle → 服务启动失败。
+      try {
+        const profilePkg = JSON.parse(fs.readFileSync(profilePkgPath, 'utf8'))
+        const bundles = profilePkg && profilePkg.dsh && profilePkg.dsh.profile && profilePkg.dsh.profile.bundles
+        if (Array.isArray(bundles) && bundles.includes(String(pkg))) {
+          profilePkg.dsh.profile.bundles = bundles.filter((b) => b !== String(pkg))
+          fs.writeFileSync(profilePkgPath, JSON.stringify(profilePkg, null, 2) + '\n')
+        }
+      } catch (_) {}
     } else if (r.log.includes('CANNOT_REMOVE_MISSING_DEPS')) {
       return { ok: true, log: '插件已不在依赖列表中，无需卸载' }
     }
