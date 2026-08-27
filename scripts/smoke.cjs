@@ -38,10 +38,10 @@ function staticChecks() {
   }
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
   const dshVer = pkg.dependencies && pkg.dependencies['@deepseek-ai/dsh']
-  check('dsh 依赖版本 rc.8', dshVer === '0.1.0-rc.8', dshVer)
+  check('dsh 依赖版本 rc.2', dshVer === '0.1.1-rc.2', dshVer)
   let installedVer = null
   try { installedVer = require(path.join(ROOT, 'node_modules/@deepseek-ai/dsh/package.json')).version } catch (_) {}
-  check('node_modules dsh 已装 rc.8', installedVer === '0.1.0-rc.8', installedVer)
+  check('node_modules dsh 已装 rc.2', installedVer === '0.1.1-rc.2', installedVer)
   const mainSrc = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8')
   check('MINI_CSS 含压平 frame 左侧空白列规则', mainSrc.includes('[class$="_frame"]') && /grid-template-columns:\s*0px/.test(mainSrc))
   check('MINI_CSS 使用 data-slot 语义', mainSrc.includes('[data-slot="sidebar"]') && mainSrc.includes('[data-slot="details"]'))
@@ -148,10 +148,14 @@ function pnpmSelfContainedCheck() {
   const pnpmBin = path.join(pnpmSrc, 'bin', 'pnpm.cjs')
   check('pnpm 已随应用打包', fs.existsSync(pnpmBin), pnpmBin)
   if (!fs.existsSync(pnpmBin)) return
-  // 复制成“全局”布局（避免 pnpm 误判为项目本地而 re-exec 失败）
+  // 复制成“全局”布局（避免 pnpm 误判为项目本地而 re-exec 失败）。
+  // 每次都强制重建：/var/folders 临时目录可能被系统清理或残留旧版本，
+  // 仅靠 existsSync 判断会沿用损坏/过期的 pnpm 拷贝。
   const gRoot = path.join(os.tmpdir(), 'dsh-smoke-pnpm', 'node_modules')
   const gDst = path.join(gRoot, 'pnpm')
-  if (!fs.existsSync(gDst)) { fs.mkdirSync(gRoot, { recursive: true }); fs.cpSync(pnpmSrc, gDst, { recursive: true }) }
+  if (fs.existsSync(gDst)) fs.rmSync(gDst, { recursive: true })
+  fs.mkdirSync(gRoot, { recursive: true })
+  fs.cpSync(pnpmSrc, gDst, { recursive: true })
   const shimDir = path.join(os.tmpdir(), 'dsh-smoke-shims')
   market.buildPnpmShims(shimDir, process.execPath, path.join(gDst, 'bin', 'pnpm.cjs'))
   const env = market.pnpmEnv(shimDir, process.env.HOME, 'https://registry.npmmirror.com')
@@ -217,7 +221,7 @@ async function stopDsh() {
 // ---------- 服务/CLI 检查 ----------
 async function serverChecks() {
   const r = await startDsh()
-  check('dsh rc.8 web 服务启动 HTTP 200', !!r && r.status === 200)
+  check('dsh rc.2 web 服务启动 HTTP 200', !!r && r.status === 200)
   if (r) check('首页为 SPA 骨架 (#root)', r.body.includes('id="root"'), `len=${r.body.length}`)
   // CLI 帮助
   const bin = path.join(ROOT, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
