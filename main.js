@@ -555,7 +555,12 @@ function ensureGlobalPnpm() {
   const dstDir = path.join(root, 'pnpm')
   const pnpmBin = path.join(dstDir, 'bin', 'pnpm.cjs')
   const pnpmDist = path.join(dstDir, 'dist', 'pnpm.cjs')
-  if (!fs.existsSync(pnpmBin) || !fs.existsSync(pnpmDist)) {
+  const srcVer = JSON.parse(fs.readFileSync(path.join(srcDir, 'package.json'), 'utf8')).version
+  const dstPkg = path.join(dstDir, 'package.json')
+  const dstVer = fs.existsSync(dstPkg) ? JSON.parse(fs.readFileSync(dstPkg, 'utf8')).version : null
+  // 版本不一致时必须重拷：pnpm 主版本升级后 store 布局变化，旧拷贝会让 dsh
+  // 服务进程继续用旧版 pnpm，导致 store 不匹配（ERR_PNPM_UNEXPECTED_STORE）。
+  if (dstVer !== srcVer || !fs.existsSync(pnpmBin) || !fs.existsSync(pnpmDist)) {
     if (fs.existsSync(dstDir)) fs.rmSync(dstDir, { recursive: true })
     fs.mkdirSync(root, { recursive: true })
     fs.cpSync(srcDir, dstDir, { recursive: true })
