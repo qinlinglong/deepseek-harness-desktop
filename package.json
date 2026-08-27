@@ -48,7 +48,7 @@
     "http-proxy": "^1.18.1",
     "js-yaml": "^4.3.1",
     "koffi": "^3.1.0",
-    "pnpm": "^9.15.9"
+    "pnpm": "^10.26.1"
   },
   "devDependencies": {
     "electron": "43.4.0",
