@@ -106,9 +106,12 @@ const MINI_CSS = `
 [data-slot="details"] { display: none !important; }
 [class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
-// 迷你窗整体缩放（豆包同款紧凑感）：对话内容字体随之缩小。
-// webview 内容由 dsh web UI 渲染，用 zoom 等比缩小最可靠，无 CSS 破坏。
+// 迷你窗内容缩放（豆包同款紧凑感，对话字体更小）。基准宽度 420 时缩放
+// MINI_ZOOM_FACTOR；窗口可拖拽调整大小，zoom 随宽度自适应：窗口拉大 → 字体
+// 相应变大（趋向 1.0），缩小 → 字体更紧凑，始终在 MINI_ZOOM_MIN..1 之间。
 const MINI_ZOOM_FACTOR = 0.85
+const MINI_ZOOM_MIN = 0.75
+const MINI_ZOOM_BASE_WIDTH = 420
 
 let mainWindow = null
 let tray = null
@@ -2559,15 +2562,28 @@ let _warmupMiniWin = null
 // 预热/新建路径共用，避免重复代码；dom-ready 时先移除旧样式再注入。
 function setupMiniCssInjection(win) {
   if (!win || win.isDestroyed()) return
+  let guestRef = null
+  // zoom 随迷你窗宽度自适应（窗口可拖拽调整大小）：
+  // 宽度 < 基准 → 更紧凑；宽度 > 基准 → 字体趋向正常；封顶 1.0 不放大。
+  const applyMiniZoom = () => {
+    if (!guestRef || !win || win.isDestroyed()) return
+    try {
+      const [w] = win.getSize()
+      const zoom = Math.max(MINI_ZOOM_MIN, Math.min(1, MINI_ZOOM_FACTOR * (w / MINI_ZOOM_BASE_WIDTH)))
+      guestRef.setZoomFactor(zoom)
+    } catch (_) {}
+  }
   win.webContents.on('did-attach-webview', (_e, guest) => {
+    guestRef = guest
     setupSelectionAsk(guest)
     let cssKey = null
     guest.on('dom-ready', () => {
       if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
       guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
-      try { guest.setZoomFactor(MINI_ZOOM_FACTOR) } catch (_) {}
+      applyMiniZoom()
     })
   })
+  win.on('resize', applyMiniZoom)
 }
 
 function createMiniWindow() {
