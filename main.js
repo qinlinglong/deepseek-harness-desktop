@@ -2238,6 +2238,20 @@ function showMini() {
   // 防御：呼出迷你窗时确保主窗口字号始终为配置值（默认 100%），
   // 避免任何呼出路径意外改变主窗口缩放。
   applyMainZoom()
+  // 诊断：记录主窗口真实渲染状态（zoom 不变但 CSS 层面缩放也能暴露）
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      const [mw, mh] = mainWindow.getSize()
+      mainWindow.webContents.executeJavaScript(`(() => ({
+        zoom: document.documentElement.style.zoom || null,
+        bodyFs: document.body ? getComputedStyle(document.body).fontSize : null,
+        rootFs: getComputedStyle(document.documentElement).fontSize,
+        innerW: innerWidth
+      }))()`).then((r) => {
+        log('main', `showMini main state: win=${mw}x${mh} ` + JSON.stringify(r))
+      }).catch(() => {})
+    }
+  } catch (_) {}
   reapplyMiniTop()
   if (isMac && nativeFloatTop) {
     nativeFloatTop.showMiniInActiveSpace(miniWin)
