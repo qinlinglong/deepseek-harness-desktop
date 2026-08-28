@@ -2235,6 +2235,9 @@ function reapplyMiniTop() {
 // panel 的 show() 不 activateIgnoringOtherApps，配合 makeKey 成为 key window。
 function showMini() {
   if (!miniWin || miniWin.isDestroyed()) return
+  // 防御：呼出迷你窗时确保主窗口字号始终为配置值（默认 100%），
+  // 避免任何呼出路径意外改变主窗口缩放。
+  applyMainZoom()
   reapplyMiniTop()
   if (isMac && nativeFloatTop) {
     nativeFloatTop.showMiniInActiveSpace(miniWin)
@@ -2319,7 +2322,9 @@ function registerIpc() {
   })
   ipcMain.on('float:toggle-mini', () => {
     const alive = miniWin && !miniWin.isDestroyed()
-    log('main', `float:toggle-mini miniWin=${alive ? 'exists' : 'null'} visible=${alive ? miniWin.isVisible() : '-'}`)
+    let mainZoom = '-'
+    try { if (mainWindow && !mainWindow.isDestroyed()) mainZoom = mainWindow.webContents.getZoomFactor() } catch (_) {}
+    log('main', `float:toggle-mini miniWin=${alive ? 'exists' : 'null'} visible=${alive ? miniWin.isVisible() : '-'} mainZoom=${mainZoom}`)
     toggleMini()
   })
   ipcMain.on('float:pong', () => { lastFloatPong = Date.now() })
