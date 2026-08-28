@@ -281,6 +281,12 @@
         <label class="check"><input type="checkbox" id="cfgShowFloat" /> 启用桌面悬浮球</label>
         <div class="hint">桌面角落的圆形小图标，点击打开迷你聊天窗口，可拖到任意位置</div>
       </div>
+
+      <div class="field">
+        <label>迷你窗字号：<span id="miniFontVal">85%</span></label>
+        <input type="range" id="cfgMiniFont" min="60" max="100" step="5" value="85" style="width:100%;accent-color:#4d6bfe;margin-top:4px" />
+        <div class="hint">迷你聊天窗口内容缩放，拉大窗口时字体随之变大；主窗口字号不受影响</div>
+      </div>
     </div>
 
       <div class="cfg-pane" data-pane="prompts">
@@ -448,6 +454,11 @@
     }
     $('cfgMode').addEventListener('change', toggleMode)
 
+    // 迷你窗字号滑块：拖动实时显示百分比
+    $('cfgMiniFont').addEventListener('input', () => {
+      $('miniFontVal').textContent = $('cfgMiniFont').value + '%'
+    })
+
     // icon picker
     const ICON_LABELS = { deepseek: 'DeepSeek（默认）', dnee: 'D娘' }
     let currentIcon = 'default'
@@ -490,6 +501,9 @@
       $('lanIps').textContent = ips
       currentIcon = ICON_LABELS[cfg.icon] ? cfg.icon : 'deepseek'
       $('cfgShowFloat').checked = cfg.showFloat !== false
+      const mfs = Math.round((typeof cfg.miniFontScale === 'number' ? cfg.miniFontScale : 0.85) * 100)
+      $('cfgMiniFont').value = mfs
+      $('miniFontVal').textContent = mfs + '%'
       toggleMode()
       loadIconPicker()
       await loadPrompts()
@@ -521,6 +535,7 @@
         remotePassword: $('cfgRemotePassword').value,
         icon: currentIcon,
         showFloat: $('cfgShowFloat').checked,
+        miniFontScale: parseInt($('cfgMiniFont').value, 10) / 100,
       }
       const res = await window.dshDesktop.saveConfig(cfg)
       if (res.ok) {

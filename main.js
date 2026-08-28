@@ -74,6 +74,7 @@ const DEFAULT_CONFIG = {
   remotePasswordEnc: '', // 远端密码加密密文（safeStorage 加密，不落明文；无 safeStorage 平台回退明文 remotePassword）
   icon: 'deepseek', // 'deepseek' | 'dnee'
   showFloat: true,
+  miniFontScale: 0.85, // 迷你窗内容缩放（可设置页调节，主窗口字号不受影响）
   bubblePos: null,
   mainBounds: null, // {x,y,width,height} 主窗口位置尺寸，启动时恢复（借鉴豆包 chat_window 持久化）
   miniBounds: null,  // {width,height} 迷你窗尺寸
@@ -107,10 +108,10 @@ const MINI_CSS = `
 [class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
 // 迷你窗内容缩放（豆包同款紧凑感，对话字体更小）。基准宽度 420 时缩放
-// MINI_ZOOM_FACTOR；窗口可拖拽调整大小，zoom 随宽度自适应：窗口拉大 → 字体
-// 相应变大（趋向 1.0），缩小 → 字体更紧凑，始终在 MINI_ZOOM_MIN..1 之间。
+// config.miniFontScale（设置页可调，默认 0.85）；窗口可拖拽调整大小，zoom 随
+// 宽度自适应：窗口拉大 → 字体相应变大（趋向 1.0），缩小 → 字体更紧凑。
 const MINI_ZOOM_FACTOR = 0.85
-const MINI_ZOOM_MIN = 0.75
+const MINI_ZOOM_MIN = 0.5
 const MINI_ZOOM_BASE_WIDTH = 420
 
 let mainWindow = null
@@ -2372,6 +2373,7 @@ function registerIpc() {
     lanIps: lanIPv4s(),
     icon: config.icon,
     showFloat: config.showFloat,
+    miniFontScale: config.miniFontScale,
   }))
 
   ipcMain.handle('dsh:save-config', (_e, cfg) => {
@@ -2387,6 +2389,9 @@ function registerIpc() {
     }
     if (ICON_FILES[cfg && cfg.icon]) config.icon = cfg.icon
     if (cfg && typeof cfg.showFloat === 'boolean') config.showFloat = cfg.showFloat
+    if (cfg && typeof cfg.miniFontScale === 'number' && Number.isFinite(cfg.miniFontScale)) {
+      config.miniFontScale = Math.max(MINI_ZOOM_MIN, Math.min(1, cfg.miniFontScale))
+    }
     if (mode === 'lan' && !config.passwordHash && !(cfg && cfg.password && String(cfg.password).trim())) {
       return { ok: false, error: '局域网服务端必须设置访问密码' }
     }
@@ -2401,6 +2406,7 @@ function registerIpc() {
     saveConfigToDisk()
     applyIcon()
     applyFloatState()
+    applyMiniZoomNow()
     applyConfig().catch((e) => log('main', 'save-config applyConfig: ' + (e && e.message)))
     return { ok: true }
   })
@@ -2560,30 +2566,31 @@ let _warmupMiniWin = null
 
 // 迷你窗 webview 注入精简 CSS（只留对话列，隐藏 sidebar/details）。
 // 预热/新建路径共用，避免重复代码；dom-ready 时先移除旧样式再注入。
+let miniGuestRef = null // 当前迷你窗的 webview guest（供设置变更时重新应用缩放）
+function applyMiniZoomNow() {
+  if (!miniGuestRef || !miniGuestRef.isDestroyed || miniGuestRef.isDestroyed()) return
+  if (!miniWin || miniWin.isDestroyed()) return
+  try {
+    const [w] = miniWin.getSize()
+    const scale = typeof config.miniFontScale === 'number' ? config.miniFontScale : MINI_ZOOM_FACTOR
+    // 基准宽度 420 时缩放为 scale；随窗口宽度自适应，封顶 1.0 不放大
+    const zoom = Math.max(MINI_ZOOM_MIN, Math.min(1, scale * (w / MINI_ZOOM_BASE_WIDTH)))
+    miniGuestRef.setZoomFactor(zoom)
+  } catch (_) {}
+}
 function setupMiniCssInjection(win) {
   if (!win || win.isDestroyed()) return
-  let guestRef = null
-  // zoom 随迷你窗宽度自适应（窗口可拖拽调整大小）：
-  // 宽度 < 基准 → 更紧凑；宽度 > 基准 → 字体趋向正常；封顶 1.0 不放大。
-  const applyMiniZoom = () => {
-    if (!guestRef || !win || win.isDestroyed()) return
-    try {
-      const [w] = win.getSize()
-      const zoom = Math.max(MINI_ZOOM_MIN, Math.min(1, MINI_ZOOM_FACTOR * (w / MINI_ZOOM_BASE_WIDTH)))
-      guestRef.setZoomFactor(zoom)
-    } catch (_) {}
-  }
   win.webContents.on('did-attach-webview', (_e, guest) => {
-    guestRef = guest
+    miniGuestRef = guest
     setupSelectionAsk(guest)
     let cssKey = null
     guest.on('dom-ready', () => {
       if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
       guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
-      applyMiniZoom()
+      applyMiniZoomNow()
     })
   })
-  win.on('resize', applyMiniZoom)
+  win.on('resize', applyMiniZoomNow)
 }
 
 function createMiniWindow() {
