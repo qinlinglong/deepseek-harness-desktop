@@ -74,7 +74,8 @@ const DEFAULT_CONFIG = {
   remotePasswordEnc: '', // 远端密码加密密文（safeStorage 加密，不落明文；无 safeStorage 平台回退明文 remotePassword）
   icon: 'deepseek', // 'deepseek' | 'dnee'
   showFloat: true,
-  miniFontScale: 0.85, // 迷你窗内容缩放（可设置页调节，主窗口字号不受影响）
+  miniFontScale: 0.85, // 迷你窗内容缩放（可设置页调节，独立于主窗口）
+  mainFontScale: 1, // 主窗口内容缩放（默认 100% 不改，可设置页独立调节）
   bubblePos: null,
   mainBounds: null, // {x,y,width,height} 主窗口位置尺寸，启动时恢复（借鉴豆包 chat_window 持久化）
   miniBounds: null,  // {width,height} 迷你窗尺寸
@@ -1448,6 +1449,8 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   setupSelectionAsk(mainWindow.webContents)
+  // 每次页面加载完成（含 index.html / dsh web 导航）应用主窗口缩放
+  mainWindow.webContents.on('did-finish-load', () => applyMainZoom())
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
   // 主窗口位置/尺寸变化时持久化（防抖 600ms）
@@ -2374,6 +2377,7 @@ function registerIpc() {
     icon: config.icon,
     showFloat: config.showFloat,
     miniFontScale: config.miniFontScale,
+    mainFontScale: config.mainFontScale,
   }))
 
   ipcMain.handle('dsh:save-config', (_e, cfg) => {
@@ -2392,6 +2396,9 @@ function registerIpc() {
     if (cfg && typeof cfg.miniFontScale === 'number' && Number.isFinite(cfg.miniFontScale)) {
       config.miniFontScale = Math.max(MINI_ZOOM_MIN, Math.min(1, cfg.miniFontScale))
     }
+    if (cfg && typeof cfg.mainFontScale === 'number' && Number.isFinite(cfg.mainFontScale)) {
+      config.mainFontScale = Math.max(0.5, Math.min(1.5, cfg.mainFontScale))
+    }
     if (mode === 'lan' && !config.passwordHash && !(cfg && cfg.password && String(cfg.password).trim())) {
       return { ok: false, error: '局域网服务端必须设置访问密码' }
     }
@@ -2406,6 +2413,7 @@ function registerIpc() {
     saveConfigToDisk()
     applyIcon()
     applyFloatState()
+    applyMainZoom()
     applyMiniZoomNow()
     applyConfig().catch((e) => log('main', 'save-config applyConfig: ' + (e && e.message)))
     return { ok: true }
@@ -2567,6 +2575,15 @@ let _warmupMiniWin = null
 // 迷你窗 webview 注入精简 CSS（只留对话列，隐藏 sidebar/details）。
 // 预热/新建路径共用，避免重复代码；dom-ready 时先移除旧样式再注入。
 let miniGuestRef = null // 当前迷你窗的 webview guest（供设置变更时重新应用缩放）
+
+// 主窗口内容缩放（设置页独立调节，默认 100% 不改变主窗口字号）。
+function applyMainZoom() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  try {
+    const z = typeof config.mainFontScale === 'number' ? config.mainFontScale : 1
+    mainWindow.webContents.setZoomFactor(Math.max(0.5, Math.min(1.5, z)))
+  } catch (_) {}
+}
 function applyMiniZoomNow() {
   if (!miniGuestRef || !miniGuestRef.isDestroyed || miniGuestRef.isDestroyed()) return
   if (!miniWin || miniWin.isDestroyed()) return

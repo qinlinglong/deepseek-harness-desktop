@@ -283,6 +283,12 @@
       </div>
 
       <div class="field">
+        <label>主窗口字号：<span id="mainFontVal">100%</span></label>
+        <input type="range" id="cfgMainFont" min="80" max="120" step="5" value="100" style="width:100%;accent-color:#4d6bfe;margin-top:4px" />
+        <div class="hint">主窗口内容缩放，默认 100% 保持原样；与迷你窗字号互不影响</div>
+      </div>
+
+      <div class="field">
         <label>迷你窗字号：<span id="miniFontVal">85%</span></label>
         <input type="range" id="cfgMiniFont" min="60" max="100" step="5" value="85" style="width:100%;accent-color:#4d6bfe;margin-top:4px" />
         <div class="hint">迷你聊天窗口内容缩放，拉大窗口时字体随之变大；主窗口字号不受影响</div>
@@ -454,7 +460,10 @@
     }
     $('cfgMode').addEventListener('change', toggleMode)
 
-    // 迷你窗字号滑块：拖动实时显示百分比
+    // 主窗口 / 迷你窗字号滑块：拖动实时显示百分比
+    $('cfgMainFont').addEventListener('input', () => {
+      $('mainFontVal').textContent = $('cfgMainFont').value + '%'
+    })
     $('cfgMiniFont').addEventListener('input', () => {
       $('miniFontVal').textContent = $('cfgMiniFont').value + '%'
     })
@@ -504,6 +513,9 @@
       const mfs = Math.round((typeof cfg.miniFontScale === 'number' ? cfg.miniFontScale : 0.85) * 100)
       $('cfgMiniFont').value = mfs
       $('miniFontVal').textContent = mfs + '%'
+      const ma = Math.round((typeof cfg.mainFontScale === 'number' ? cfg.mainFontScale : 1) * 100)
+      $('cfgMainFont').value = ma
+      $('mainFontVal').textContent = ma + '%'
       toggleMode()
       loadIconPicker()
       await loadPrompts()
@@ -536,6 +548,7 @@
         icon: currentIcon,
         showFloat: $('cfgShowFloat').checked,
         miniFontScale: parseInt($('cfgMiniFont').value, 10) / 100,
+        mainFontScale: parseInt($('cfgMainFont').value, 10) / 100,
       }
       const res = await window.dshDesktop.saveConfig(cfg)
       if (res.ok) {
