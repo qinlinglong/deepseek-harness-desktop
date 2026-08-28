@@ -2242,12 +2242,18 @@ function showMini() {
   try {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
       const [mw, mh] = mainWindow.getSize()
-      mainWindow.webContents.executeJavaScript(`(() => ({
-        zoom: document.documentElement.style.zoom || null,
-        bodyFs: document.body ? getComputedStyle(document.body).fontSize : null,
-        rootFs: getComputedStyle(document.documentElement).fontSize,
-        innerW: innerWidth
-      }))()`).then((r) => {
+      mainWindow.webContents.executeJavaScript(`(() => {
+        const ls = {}
+        try { for (let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); ls[k]=(localStorage.getItem(k)||'').slice(0,100) } } catch(_){}
+        return {
+          zoom: document.documentElement.style.zoom || null,
+          bodyZoom: getComputedStyle(document.body).zoom,
+          bodyFs: document.body ? getComputedStyle(document.body).fontSize : null,
+          rootFs: getComputedStyle(document.documentElement).fontSize,
+          innerW: innerWidth,
+          ls
+        }
+      })()`).then((r) => {
         log('main', `showMini main state: win=${mw}x${mh} ` + JSON.stringify(r))
       }).catch(() => {})
     }
