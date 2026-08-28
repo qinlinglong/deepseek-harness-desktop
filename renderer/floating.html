@@ -10,24 +10,28 @@
     body { display: flex; align-items: center; justify-content: center; }
     #bubble {
       position: relative;
-      width: 44px; height: 44px; border-radius: 50%; cursor: grab;
-      background: radial-gradient(circle at 30% 28%, #ffffff, #e4e9f4 72%);
-      border: 2px solid rgba(110, 132, 210, .65);
+      width: 40px; height: 40px; border-radius: 50%; cursor: grab;
+      background: radial-gradient(circle at 30% 28%, #ffffff, #eef2f9 72%);
+      border: 1px solid rgba(120, 140, 200, .35);
+      box-shadow: 0 2px 8px rgba(30, 40, 80, .18);
       user-select: none;
+      transition: transform .15s ease, box-shadow .15s ease;
     }
     #bubble::before {
       content: '';
-      position: absolute; inset: 3px;
+      position: absolute; inset: 5px;
       border-radius: 50%;
       background-size: contain; background-position: center; background-repeat: no-repeat;
       background-image: var(--bubble-icon, none);
       -webkit-mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
               mask-image: radial-gradient(circle 50% at center, #000 calc(100% - 2px), transparent 100%);
     }
-    #bubble:active { cursor: grabbing; }
+    #bubble:hover { transform: scale(1.06); box-shadow: 0 3px 12px rgba(30, 40, 80, .22); }
+    #bubble:active { cursor: grabbing; transform: scale(.96); }
     #bubble.dragging {
       transform: scale(1.12);
-      border-color: rgba(110, 132, 210, .9);
+      border-color: rgba(110, 132, 210, .7);
+      box-shadow: 0 4px 16px rgba(30, 40, 80, .28);
       cursor: grabbing; /* 拖动时握拳小手（豆包同款） */
     }
   </style>
