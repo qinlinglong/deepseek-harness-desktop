@@ -53,10 +53,14 @@ Any device on the LAN can open the address in a browser. First visit shows a log
 - Top toolbar: open main window / pin toggle / collapse
 - Optional always-on-top, pairs with the floating ball
 - Called up without stealing focus or switching Spaces; IME candidate words display correctly when typing Chinese
+- **Resizable**: drag any edge to resize; the content zoom auto-adapts to the window width (0.75~1.0) so text stays comfortable at any size
+- **Independent font scale**: set a different font size for the mini window (60%~100%) in Settings — completely separate from the main window
 
 <div align="center">
   <img src="assets/dsh-pic-悬浮图标和迷你窗口.jpg" width="560" />
 </div>
+
+**Main & Mini window font sizes are configured independently** in Settings (main window 80%~120%, mini window 60%~100%); both apply instantly. The floating ball renderer is self-healing — a heartbeat watchdog automatically rebuilds it if the renderer ever hangs.
 
 ### Ask with Selection
 
@@ -74,6 +78,7 @@ Browse, install and uninstall deepseek-harness plugins in-app:
 - **In-app install**: bundled pnpm and Node runtime — no system Node/pnpm needed; installs from the npmmirror registry
 - **Remote install**: in LAN Connect mode, install/uninstall plugins on a remote desktop server (requires the remote to run LAN Server and a password)
 - **Compatibility check**: verifies plugin/SDK version compatibility before installing
+- **Safe bundle uninstall**: uninstalling a bundled plugin (e.g. `@linxin666/dsh-web-ui-all`) also removes its `dsh.profile.bundles` reference, so the service boots cleanly afterwards
 
 ### App Icon Switching
 
@@ -85,7 +90,8 @@ Download platform artifacts from [GitHub Releases](https://github.com/qinlinglon
 
 | Platform | Installer |
 |----------|-----------|
-| macOS | `DeepSeek-Harness-<version>-arm64.dmg` (or `-mac.zip`) |
+| macOS (Apple Silicon) | `DeepSeek-Harness-<version>-arm64.dmg` (or `-arm64-mac.zip`) |
+| macOS (Intel) | `DeepSeek-Harness-<version>-mac.dmg` (or `-mac.zip`) |
 | Windows | `DeepSeek-Harness-Setup-<version>.exe` (installer) or `DeepSeek-Harness-<version>-portable.exe` (portable) |
 | Linux | `DeepSeek-Harness-<version>.AppImage` or `dsh-desktop_<version>_amd64.deb` |
 
@@ -142,19 +148,20 @@ npm run smoke        # smoke tests (static checks + server boot + DOM render)
 > They must be declared explicitly in the root `package.json` `dependencies` (see `cordis-plugin-group`,
 > `dsh-fs`, `dsh-shell`, `dsh-subprocess`, etc.). After upgrading `@deepseek-ai/dsh`, if the packaged
 > build fails with `ERR_MODULE_NOT_FOUND`, add the missing peer deps as in the dev environment.
-> Currently bundled **`@deepseek-ai/dsh@0.1.0-rc.8`** (and all `dsh-*` sub-packages at the same
-> version). After upgrading harness, note web UI structure changes: `scripts/dump-dom.js` and the
-> `MINI_CSS` in `main.js` follow rc.8's `data-slot` semantics (`sidebar` / `details`).
+> Currently bundled **`@deepseek-ai/dsh@0.1.1-rc.2`** (and all `dsh-*` sub-packages at the same
+> version, aligned with upstream master). After upgrading harness, note web UI structure changes: `scripts/dump-dom.js` and the
+> `MINI_CSS` in `main.js` follow the latest `data-slot` semantics (`sidebar` / `details`).
 
 ## Packaging
 
 | Platform | Command | Output |
 |----------|---------|--------|
-| macOS | `npm run dist:mac` | `release/*.dmg`, `*.zip`, `.app` |
+| macOS | `npm run dist:mac` | `release/*.dmg`, `*.zip` for **both arm64 & x64** (Apple Silicon + Intel) |
 | Windows | `npm run dist:win` | `release/*.exe` (NSIS + portable) |
 | Linux | `npm run dist:linux` | `release/*.AppImage`, `*.deb` |
 
 - **Build on the target OS**: Windows/Linux artifacts must be built on their own OS (or CI) after `npm ci`. Native modules (sharp, koffi, node-addon-require-builtin, landlock, etc.) install per-platform via `optionalDependencies` — cross-building from macOS only packages darwin binaries, and the resulting Windows/Linux installers crash at startup for missing `*_win32-x64` / `*_linux-x64` modules.
+- **macOS dual-arch**: `dist:mac` builds arm64 + x64. Both platform binaries (e.g. `@koromix/koffi-darwin-x64`, `@img/sharp-darwin-x64`, `node-addon-require-builtin-darwin-x64`) are declared explicitly and installed with `npm ci --force` (npm blocks cross-CPU optional installs); `verify-native.mjs` checks each `mac*` output against its own arch.
 - Recommended: use the built-in GitHub Actions workflow (`.github/workflows/build.yml`) — a three-OS matrix runs `npm ci` + build on each OS, verifies native modules with `node scripts/verify-native.mjs`, then uploads artifacts.
 - Locally, run `node scripts/verify-native.mjs` to quickly check that `release/*-unpacked` contains the native modules for the current platform.
 - The app bundles a Node runtime (Electron `ELECTRON_RUN_AS_NODE`); native modules (node-pty, sharp, koffi, etc.) are N-API prebuilds, cross-platform usable (as long as they are installed per-platform as above).

@@ -53,10 +53,14 @@
 - 顶部工具栏：打开主窗口 / 置顶切换 / 收起
 - 始终置顶可选，配合悬浮球使用，随时呼出随时收起
 - 呼出时不抢占系统焦点、不切换 Space；输入中文时输入法候选词正常显示
+- **可拖拽调整大小**：拖动任意边缘即可缩放窗口，内容缩放随窗口宽度自适应（0.75~1.0），任意尺寸下文字都舒适
+- **独立字号**：可在设置页单独调节迷你窗字号（60%~100%），与主窗口字号完全分开
 
 <div align="center">
   <img src="assets/dsh-pic-悬浮图标和迷你窗口.jpg" width="560" />
 </div>
+
+**主窗口与迷你窗字号在设置页分开配置**（主窗口 80%~120%、迷你窗 60%~100%），均即时生效。悬浮球渲染进程具备自愈能力——心跳看门狗检测到渲染进程卡死时自动重建悬浮球。
 
 ### 划词即问
 
@@ -74,6 +78,7 @@
 - **应用内安装**：打包内置 pnpm 与 Node 运行时，无需系统 Node/pnpm，即可从淘宝镜像安装插件
 - **远程安装**：局域网连接模式下，可向远端桌面服务远程安装/卸载插件（需远端开启局域网服务端并填写密码）
 - **兼容检查**：安装前自动校验插件与内置 SDK 的版本兼容性，避免装出不兼容插件
+- **安全卸载内置组件**：卸载捆绑插件（如 `@linxin666/dsh-web-ui-all`）时会同步移除其 `dsh.profile.bundles` 引用，卸载后服务仍能正常启动
 
 ### 应用图标切换
 
@@ -85,7 +90,8 @@
 
 | 平台 | 安装包 |
 |------|--------|
-| macOS | `DeepSeek-Harness-<版本>-arm64.dmg`（或 `-mac.zip`） |
+| macOS (Apple Silicon) | `DeepSeek-Harness-<版本>-arm64.dmg`（或 `-arm64-mac.zip`） |
+| macOS (Intel) | `DeepSeek-Harness-<版本>-mac.dmg`（或 `-mac.zip`） |
 | Windows | `DeepSeek-Harness-Setup-<版本>.exe`（安装版）或 `DeepSeek-Harness-<版本>-portable.exe`（免安装版） |
 | Linux | `DeepSeek-Harness-<版本>.AppImage` 或 `dsh-desktop_<版本>_amd64.deb` |
 
@@ -142,19 +148,20 @@ npm run smoke        # 冒烟测试（静态检查 + 服务启动 + DOM 渲染�
 > 必须显式声明在根 `package.json` 的 `dependencies` 中（见 `cordis-plugin-group`、`dsh-fs`、
 > `dsh-shell`、`dsh-subprocess` 等）。升级 `@deepseek-ai/dsh` 后若打包版启动报
 > `ERR_MODULE_NOT_FOUND`，对照 dev 环境补齐缺失的 peer 依赖即可。
-> 当前内置 **`@deepseek-ai/dsh@0.1.0-rc.8`**（及全部 `dsh-*` 子包同版本）。升级 harness
-> 后注意 web UI 结构变化：`scripts/dump-dom.js` 与 `main.js` 的 `MINI_CSS` 均按 rc.8 的
+> 当前内置 **`@deepseek-ai/dsh@0.1.1-rc.2`**（及全部 `dsh-*` 子包同版本，对齐上游 master）。升级 harness
+> 后注意 web UI 结构变化：`scripts/dump-dom.js` 与 `main.js` 的 `MINI_CSS` 均按最新的
 > `data-slot` 语义（`sidebar` / `details`）适配。
 
 ## 打包
 
 | 平台 | 命令 | 产物 |
 |------|------|------|
-| macOS | `npm run dist:mac` | `release/*.dmg`、`*.zip`、`.app` |
+| macOS | `npm run dist:mac` | `release/*.dmg`、`*.zip`，同时产出 **arm64 与 x64**（Apple Silicon + Intel） |
 | Windows | `npm run dist:win` | `release/*.exe`（NSIS 安装包 + portable 免安装版） |
 | Linux | `npm run dist:linux` | `release/*.AppImage`、`*.deb` |
 
 - **必须在目标平台上构建**：Windows / Linux 产物必须分别在 Windows / Linux（或 CI）上执行 `npm ci` 后构建。原因是 sharp、koffi、node-addon-require-builtin、landlock 等原生模块以 `optionalDependencies` 按平台安装——在 macOS 上 cross-build 只会打包 darwin 原生二进制，生成的 Windows/Linux 安装包会在启动时因缺少 `*_win32-x64` / `*_linux-x64` 模块而直接崩溃。
+- **macOS 双架构**：`dist:mac` 同时构建 arm64 + x64。两个平台的原生库（如 `@koromix/koffi-darwin-x64`、`@img/sharp-darwin-x64`、`node-addon-require-builtin-darwin-x64`）已在依赖中显式声明，并以 `npm ci --force` 安装（npm 会拦截跨 CPU 的 optional 安装）；`verify-native.mjs` 会按每个 `mac*` 产物目录各自的架构逐一校验。
 - 推荐使用仓库内置的 GitHub Actions 工作流（`.github/workflows/build.yml`）：三平台矩阵各自在对应 OS 上 `npm ci` + 构建，构建后自动运行 `node scripts/verify-native.mjs` 校验原生模块齐全，再上传产物。
 - 本地可先跑 `node scripts/verify-native.mjs` 快速检查 `release/*-unpacked` 中当前平台的原生模块是否齐全。
 - 应用内已内置 Node 运行时（Electron 的 `ELECTRON_RUN_AS_NODE`），原生模块（node-pty、sharp、koffi 等）均为 N-API prebuild，跨平台可用（前提是按上面要求在各平台安装）。
