@@ -1,3 +1,5 @@
+**English** | [中文](README.zh-CN.md)
+
 # DeepSeek Harness Desktop
 
 > Open Source: <https://github.com/qinlinglong/deepseek-harness-desktop>
