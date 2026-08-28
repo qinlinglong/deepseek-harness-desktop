@@ -40,8 +40,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        # 在目标平台原生安装，optionalDependencies 会拉取本平台的原生模块
-        run: npm ci
+        # 在目标平台原生安装，optionalDependencies 会拉取本平台的原生模块。
+        # --force：mac 双架构（arm64+x64）需在任意 runner 上同时安装两个平台的
+        # koffi 原生二进制，cpu/os 过滤会拒绝跨架构安装，故强制。
+        run: npm ci --force
 
       - name: Build ${{ matrix.os }}
         # 仅打包，不在这里 publish：多 job 并发发布到同一 draft release 存在竞态，

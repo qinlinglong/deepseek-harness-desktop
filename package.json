@@ -20,7 +20,7 @@
     "verify:native": "node scripts/verify-native.mjs",
     "smoke": "electron scripts/smoke.cjs",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
+    "dist:mac": "electron-builder --mac --arm64 --x64",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux"
   },
@@ -45,6 +45,7 @@
     "@deepseek-ai/dsh-subprocess": "0.1.1-rc.2",
     "@deepseek-ai/dsh-timeout": "0.1.1-rc.2",
     "@deepseek-ai/dsh-workflow": "0.1.1-rc.2",
+    "@koromix/koffi-darwin-x64": "^3.1.5",
     "http-proxy": "^1.18.1",
     "js-yaml": "^4.3.1",
     "koffi": "^3.1.0",

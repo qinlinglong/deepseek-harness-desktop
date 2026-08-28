@@ -47,7 +47,9 @@ function platformKey() {
   return `linux-${process.arch}`
 }
 
-/** Locate every unpacked resources dir (where natives are extracted). */
+/** Locate every unpacked resources dir (where natives are extracted).
+ * 返回 [{ dir, key }]：mac 从目录名（mac-arm64 / mac-x64）推断架构，
+ * 使双架构构建时各自验证对应架构的原生模块；win/linux 用当前平台。 */
 function unpackedResourcesDirs() {
   const dirs = []
   let entries = []
@@ -65,16 +67,15 @@ function unpackedResourcesDirs() {
       continue
     }
     if (!st.isDirectory()) continue
-    // mac: release/mac-*/...app/Contents/Resources ; win/linux: *-unpacked/resources
-    const candidates = []
     if (PLATFORM === 'darwin' && name.startsWith('mac-')) {
       const appDir = join(p, 'DeepSeek Harness.app', 'Contents', 'Resources')
-      candidates.push(appDir)
+      if (existsSync(appDir)) {
+        const arch = name.slice(4) // 'mac-arm64' -> 'arm64', 'mac-x64' -> 'x64'
+        dirs.push({ dir: appDir, key: `darwin-${arch}` })
+      }
     } else if (name.endsWith('-unpacked')) {
-      candidates.push(join(p, 'resources'))
-    }
-    for (const c of candidates) {
-      if (existsSync(c)) dirs.push(c)
+      const resources = join(p, 'resources')
+      if (existsSync(resources)) dirs.push({ dir: resources, key: platformKey() })
     }
   }
   return dirs
@@ -106,7 +107,9 @@ if (resourcesDirs.length === 0) {
 }
 
 let ok = true
-for (const dir of resourcesDirs) {
+for (const entry of resourcesDirs) {
+  const dir = entry.dir
+  const key = entry.key
   console.log(`\n=== ${dir.replace(releaseRoot + '/', '')} (key: ${key}) ===`)
   const natives = collectNativeFiles(dir)
   for (const { name, match } of checks) {
