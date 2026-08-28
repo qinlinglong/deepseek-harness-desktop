@@ -67,10 +67,11 @@ function unpackedResourcesDirs() {
       continue
     }
     if (!st.isDirectory()) continue
-    if (PLATFORM === 'darwin' && name.startsWith('mac-')) {
+    if (PLATFORM === 'darwin' && (name === 'mac' || name.startsWith('mac-'))) {
       const appDir = join(p, 'DeepSeek Harness.app', 'Contents', 'Resources')
       if (existsSync(appDir)) {
-        const arch = name.slice(4) // 'mac-arm64' -> 'arm64', 'mac-x64' -> 'x64'
+        // 'mac'（x64 默认目录，无后缀）或 'mac-arm64'/'mac-x64'
+        const arch = name === 'mac' ? 'x64' : name.slice(4)
         dirs.push({ dir: appDir, key: `darwin-${arch}` })
       }
     } else if (name.endsWith('-unpacked')) {
@@ -82,22 +83,24 @@ function unpackedResourcesDirs() {
 }
 
 const key = platformKey()
-const checks = [
-  { name: 'sharp', match: (p) => p.includes(`sharp-${key}`) },
-  { name: 'koffi', match: (p) => p.includes(`koffi-${key}`) },
-  {
-    name: 'node-pty',
-    // prebuilds/<key> or build/Release/pty.node; match on substrings so it
-    // works with both forward (POSIX) and backslash (Windows) separators.
-    match: (p) => p.includes('node-pty') && (
-      (p.includes('prebuilds') && p.includes(key)) ||
-      /node-pty[\\/]build[\\/]Release[\\/]pty\.node$/.test(p)
-    ),
-  },
-  { name: 'node-addon-require-builtin', match: (p) => p.includes(`require-builtin-${key}`) },
-]
-if (PLATFORM === 'linux') {
-  checks.push({ name: 'landlock', match: (p) => p.includes('landlock-run-linux') })
+
+function makeChecks(k) {
+  const checks = [
+    { name: 'sharp', match: (p) => p.includes(`sharp-${k}`) },
+    { name: 'koffi', match: (p) => p.includes(`koffi-${k}`) },
+    {
+      name: 'node-pty',
+      match: (p) => p.includes('node-pty') && (
+        (p.includes('prebuilds') && p.includes(k)) ||
+        /node-pty[\\/]build[\\/]Release[\\/]pty\.node$/.test(p)
+      ),
+    },
+    { name: 'node-addon-require-builtin', match: (p) => p.includes(`require-builtin-${k}`) },
+  ]
+  if (PLATFORM === 'linux') {
+    checks.push({ name: 'landlock', match: (p) => p.includes('landlock-run-linux') })
+  }
+  return checks
 }
 
 const resourcesDirs = unpackedResourcesDirs()
@@ -112,7 +115,7 @@ for (const entry of resourcesDirs) {
   const key = entry.key
   console.log(`\n=== ${dir.replace(releaseRoot + '/', '')} (key: ${key}) ===`)
   const natives = collectNativeFiles(dir)
-  for (const { name, match } of checks) {
+  for (const { name, match } of makeChecks(key)) {
     const hit = natives.find(match)
     if (hit) {
       console.log(`  ✓ ${name}: ...${hit.split(/node_modules[\\/]/).pop()}`)
