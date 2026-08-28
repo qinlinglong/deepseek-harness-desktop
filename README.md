@@ -1,189 +1,189 @@
-# DeepSeek Harness 桌面版
+# DeepSeek Harness Desktop
 
-> 开源地址：<https://github.com/qinlinglong/deepseek-harness-desktop>
+> Open Source: <https://github.com/qinlinglong/deepseek-harness-desktop>
 
-基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的跨平台桌面应用（Electron），**免命令行安装**。打包时已将 Node.js 运行时、`@deepseek-ai/dsh` 及全部依赖内置，双击即用，无需安装 Node.js、无需执行任何命令。
+A cross-platform desktop application (Electron) built on [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness), **no command line required**. The Node.js runtime, `@deepseek-ai/dsh` and all dependencies are bundled — just double-click to run. No Node.js installation or commands needed.
 
-## 功能亮点
+## Highlights
 
-### 三种连接方式
+### Three Connection Modes
 
-> 在设置页或悬浮球右键菜单即可随时切换，保存后立即生效。
+> Switch anytime from the settings page or the floating ball's right-click menu; changes take effect immediately after saving.
 
-**本机模式（默认）**：开箱即用，应用内置完整的 Agent Harness 服务，双击即可开始使用。
+**Local Mode (default)**: Works out of the box — the app bundles a full Agent Harness service. Double-click to start.
 
 <div align="center">
   <img src="assets/dsh-pic-本地模式-即可启动直接打开使用.jpg" width="560" />
 </div>
 
-**局域网服务端**：把本机 Agent 能力安全地分享给整个局域网。开启后自动探测并给出「IP + 端口」访问地址；端口被占用时自动顺延到空闲端口，并自动过滤不可达的网卡 IP。
+**LAN Server**: Securely share your local Agent with the whole LAN. On enable it auto-detects and shows the accessible `IP + port` address; auto-falls-back to a free port when busy, and filters out unreachable NIC IPs.
 
 <div align="center">
   <img src="assets/dsh-pic-开启局域网访问.jpg" width="560" />
 </div>
 
-局域网内任意设备用浏览器打开上方地址，首次访问会进入登录认证界面，输入访问密码即可使用：
+Any device on the LAN can open the address in a browser. First visit shows a login page — enter the access password:
 
 <div align="center">
   <img src="assets/dsh-pic-局域网服务登录认证界面.jpg" width="320" />
   <img src="assets/dsh-pic-开启局域网访问-打开网站.jpg" width="320" />
 </div>
 
-**局域网连接**：连接 `127.0.0.1` 本机服务，或局域网内其他设备开启的局域网服务端。选择该模式会自动跳转到填写页面，填入 IP + 端口 + 协议（HTTP/HTTPS）即可连上远程服务。
+**LAN Connect**: Connect to `127.0.0.1`, or to a LAN server running on another device. Fill in IP + port + protocol (HTTP/HTTPS) and you're connected.
 
 <div align="center">
   <img src="assets/dsh-pic-远程链接.jpg" width="560" />
 </div>
 
-### 桌面悬浮球与迷你聊天窗口
+### Floating Ball & Mini Chat Window
 
-> 常驻桌角的白色圆形悬浮球 + 聚焦聊天的轻量迷你窗，配合使用，随时呼出随时收起。
+> A white round floating ball docked at the screen corner + a distraction-free mini chat window. Call them up or dismiss them anytime.
 
-**桌面悬浮球**：始终置顶，是最高效的入口。
+**Floating Ball**: Always on top — the fastest entry point.
 
-- **点击**：弹出迷你聊天窗口，随时对话
-- **按住拖动**：任意摆放位置（防误触设计，按住约 0.2 秒后进入拖动）
-- **右键菜单**：快速切换应用图标、三种连接方式、打开设置或退出，无需进入主界面
-- 全屏/其他应用之上依然可见，随叫随到
+- **Click**: opens the mini chat window
+- **Press & drag**: reposition anywhere (anti-accident design; drag engages after ~0.2s hold)
+- **Right-click menu**: switch app icon, connection mode, open settings, or quit — no need to open the main window
+- Visible even over fullscreen apps / other applications
 
-**迷你聊天窗口**：自动隐藏侧边栏与详情栏，只保留对话输入区，让注意力不被干扰。
+**Mini Chat Window**: Hides the sidebar and details panel, keeping only the conversation input area.
 
-- 顶部工具栏：打开主窗口 / 置顶切换 / 收起
-- 始终置顶可选，配合悬浮球使用，随时呼出随时收起
-- 呼出时不抢占系统焦点、不切换 Space；输入中文时输入法候选词正常显示
+- Top toolbar: open main window / pin toggle / collapse
+- Optional always-on-top, pairs with the floating ball
+- Called up without stealing focus or switching Spaces; IME candidate words display correctly when typing Chinese
 
 <div align="center">
   <img src="assets/dsh-pic-悬浮图标和迷你窗口.jpg" width="560" />
 </div>
 
-### 划词即问
+### Ask with Selection
 
-在应用内任意选中文本，右键选择「用 DeepSeek 提问」，即可作为新会话提问。
+Select any text in the app, right-click and choose "Ask DeepSeek" to ask it as a new session.
 
-### 快捷指令 / 提词器
+### Quick Prompts / Prompt Library
 
-内置总结全文、解释代码、优化重构、修复 Bug、翻译等常用指令，可在设置中自由增删；迷你窗顶部按钮随时呼出，一键填入提问。
+Built-in prompts (summarize, explain code, refactor, fix bugs, translate, etc.), freely editable in settings; one-click fill from the mini window's toolbar button.
 
-### 插件市场
+### Plugin Market
 
-应用内置插件市场，浏览、安装、卸载 deepseek-harness 插件：
+Browse, install and uninstall deepseek-harness plugins in-app:
 
-- **多市场源**：内置 dsh.market、awesome-dsh-plugin.com，支持自定义源（JSON/HTML 声明式描述符）
-- **应用内安装**：打包内置 pnpm 与 Node 运行时，无需系统 Node/pnpm，即可从淘宝镜像安装插件
-- **远程安装**：局域网连接模式下，可向远端桌面服务远程安装/卸载插件（需远端开启局域网服务端并填写密码）
-- **兼容检查**：安装前自动校验插件与内置 SDK 的版本兼容性，避免装出不兼容插件
+- **Multiple sources**: built-in dsh.market and awesome-dsh-plugin.com, plus custom sources via declarative JSON/HTML descriptors
+- **In-app install**: bundled pnpm and Node runtime — no system Node/pnpm needed; installs from the npmmirror registry
+- **Remote install**: in LAN Connect mode, install/uninstall plugins on a remote desktop server (requires the remote to run LAN Server and a password)
+- **Compatibility check**: verifies plugin/SDK version compatibility before installing
 
-### 应用图标切换
+### App Icon Switching
 
-> 设置中可在「DeepSeek（默认）/ D娘」间切换，托盘、窗口、Dock 与悬浮球图标即时生效。
+> Switch between "DeepSeek (default)" and "D娘" in settings; tray, window, Dock and floating ball icons update instantly.
 
-## 下载与安装
+## Download & Install
 
-从 [GitHub Releases](https://github.com/qinlinglong/deepseek-harness-desktop/releases) 下载对应平台产物：
+Download platform artifacts from [GitHub Releases](https://github.com/qinlinglong/deepseek-harness-desktop/releases):
 
-| 平台 | 安装包 |
-|------|--------|
-| macOS | `DeepSeek-Harness-<版本>-arm64.dmg`（或 `-mac.zip`） |
-| Windows | `DeepSeek-Harness-Setup-<版本>.exe`（安装版）或 `DeepSeek-Harness-<版本>-portable.exe`（免安装版） |
-| Linux | `DeepSeek-Harness-<版本>.AppImage` 或 `dsh-desktop_<版本>_amd64.deb` |
+| Platform | Installer |
+|----------|-----------|
+| macOS | `DeepSeek-Harness-<version>-arm64.dmg` (or `-mac.zip`) |
+| Windows | `DeepSeek-Harness-Setup-<version>.exe` (installer) or `DeepSeek-Harness-<version>-portable.exe` (portable) |
+| Linux | `DeepSeek-Harness-<version>.AppImage` or `dsh-desktop_<version>_amd64.deb` |
 
-> **macOS 首次打开提示「已损坏，无法打开」/「无法验证开发者」**：应用暂未进行 Apple 签名与公证，非 App Store 下载的未签名应用会被 Gatekeeper 拦截。任选其一放行：
-> - 右键应用 → 打开 → 在二次确认弹窗中点击「打开」；
-> - 或执行 `xattr -cr "/Applications/DeepSeek Harness.app"`（zip 版先解压，再对 `.app` 执行）；
-> - 使用 Apple Developer ID 证书签名并公证后即可消除此提示。
+> **macOS "app is damaged" / "unidentified developer" warning**: the app is not yet Apple-signed or notarized, and unsigned apps from outside the App Store are blocked by Gatekeeper. Choose one:
+> - Right-click the app → Open → click "Open" in the confirmation dialog;
+> - Or run `xattr -cr "/Applications/DeepSeek Harness.app"` (unzip the zip first, then apply to the `.app`);
+> - Signing with an Apple Developer ID certificate removes the warning.
 
-## 全局快捷键
+## Global Shortcuts
 
-| 快捷键 | 功能 |
-|--------|------|
-| `Cmd/Ctrl+Shift+D` | 打开/聚焦主窗口 |
-| `Alt+D` | 切换迷你聊天窗 |
-| `Alt+S` | 切换悬浮球显隐 |
+| Shortcut | Action |
+|----------|--------|
+| `Cmd/Ctrl+Shift+D` | Open/focus main window |
+| `Alt+D` | Toggle mini chat window |
+| `Alt+S` | Toggle floating ball |
 
-## 平台注意事项
+## Platform Notes
 
-- **Windows**：安装包未签名，首次运行可能提示「Windows 已保护你的电脑」，选择「更多信息 → 仍要运行」即可。Agent 部分工具依赖 bash 环境，**建议安装 [Git for Windows](https://git-scm.com/download/win)（自带 Git Bash）**，否则部分工具（如终端/bash 命令）可能不可用。
-- **Linux**：AppImage 需系统安装 FUSE（Debian/Ubuntu：`sudo apt install libfuse2`）；透明悬浮球在 Wayland 合成器下可能显示异常，建议在 X11 会话下使用。
-- **托盘图标**：依赖系统托盘实现（Windows 任务栏 / Linux AppIndicator，GNOME 需安装 AppIndicator 扩展）。
+- **Windows**: the installer is unsigned; first run may show "Windows protected your PC" — choose "More info → Run anyway". Some Agent tools depend on bash; **installing [Git for Windows](https://git-scm.com/download/win) (with Git Bash) is recommended**, otherwise tools like terminal/bash may be unavailable.
+- **Linux**: AppImage requires FUSE (Debian/Ubuntu: `sudo apt install libfuse2`); the transparent floating ball may render incorrectly under Wayland — X11 session recommended.
+- **Tray icon**: relies on system tray support (Windows taskbar / Linux AppIndicator; GNOME needs the AppIndicator extension).
 
-## 安全模型
+## Security Model
 
-局域网访问由两层防护：
+LAN access is protected by two layers:
 
-1. **密码门禁**：应用在 `0.0.0.0:<局域网端口>` 启动一个反向代理，未携带有效登录 Cookie 的请求一律返回登录页。密码以 scrypt KDF（随机盐 + 高计算成本）形式存储（config.json，格式 `scrypt$N$r$p$salt$hash`，旧版 sha256 哈希自动兼容并在下次登录时升级），登录比较使用恒定时间算法（`crypto.timingSafeEqual`）。
-2. **dsh 浏览器信任围栏**：dsh 本身绑定 `127.0.0.1`（随机端口），并通过 `--trusted-host <局域网IP>` 只信任当前机器的局域网 IP。因此即便知道密码，DNS 重绑定、跨站请求、以及通过其它 IP 的访问都会被 dsh 的 `/api` 围栏拒绝（403）。
+1. **Password gate**: the app starts a reverse proxy on `0.0.0.0:<lanPort>`; requests without a valid session cookie get the login page. Passwords are stored with scrypt KDF (random salt + high cost; format `scrypt$N$r$p$salt$hash`; legacy sha256 hashes are auto-upgraded on next login). Comparison uses constant-time `crypto.timingSafeEqual`.
+2. **dsh browser trust fence**: dsh binds to `127.0.0.1` (random port) and only trusts the machine's LAN IPs via `--trusted-host`. Even with the password, DNS rebinding, cross-site requests, and access through other IPs are rejected by dsh's `/api` fence (403).
 
-> ⚠ 局域网模式下，任何知道密码的设备都能操作本机 Agent 并执行命令。请设置高强度密码，仅在可信网络使用。
+> ⚠ In LAN mode, any device knowing the password can operate the local Agent and run commands. Use a strong password and only on trusted networks.
 
-> 远端访问密码（局域网连接模式）通过 Electron safeStorage 加密存储（macOS Keychain / Windows DPAPI / Linux libsecret），config.json 不落明文；系统不支持加密时回退明文并保留 0600 权限。局域网密码本身以 scrypt 哈希存储。
+> The remote access password (LAN Connect mode) is stored encrypted via Electron `safeStorage` (macOS Keychain / Windows DPAPI / Linux libsecret); `config.json` never holds it in plaintext. If the system has no encryption backend, it falls back to plaintext with `0600` permissions. The LAN server password itself is stored as a scrypt hash.
 
-## 数据与配置
+## Data & Config
 
-- 用户数据：`~/.dsh`（dsh 的 harness home，含 profiles / 会话 / 凭据）
-- 应用配置：`<userData>/config.json`（连接方式、局域网端口、密码哈希、市场源、窗口位置）
-- 快捷指令：`<userData>/prompts.json`
-- 日志：`<userData>/logs/dsh-desktop.log`（自动轮转，单文件 5MB，保留最近 3 份）
-- 配置目录：
+- User data: `~/.dsh` (dsh harness home: profiles / sessions / credentials)
+- App config: `<userData>/config.json` (mode, LAN port, password hash, market sources, window bounds)
+- Quick prompts: `<userData>/prompts.json`
+- Logs: `<userData>/logs/dsh-desktop.log` (auto-rotating, 5MB per file, keeps last 3)
+- Config directory:
   - macOS: `~/Library/Application Support/dsh-desktop/`
   - Windows: `%APPDATA%/dsh-desktop/`
   - Linux: `~/.config/dsh-desktop/`
 
-## 开发
+## Development
 
 ```bash
 npm install
-npm start            # 开发模式启动
-npm run smoke        # 冒烟测试（静态检查 + 服务启动 + DOM 渲染）
+npm start            # dev mode
+npm run smoke        # smoke tests (static checks + server boot + DOM render)
 ```
 
-> ⚠ 维护提示：`@deepseek-ai/*` 的 **peerDependencies** 不会被 electron-builder 自动打包，
-> 必须显式声明在根 `package.json` 的 `dependencies` 中（见 `cordis-plugin-group`、`dsh-fs`、
-> `dsh-shell`、`dsh-subprocess` 等）。升级 `@deepseek-ai/dsh` 后若打包版启动报
-> `ERR_MODULE_NOT_FOUND`，对照 dev 环境补齐缺失的 peer 依赖即可。
-> 当前内置 **`@deepseek-ai/dsh@0.1.0-rc.8`**（及全部 `dsh-*` 子包同版本）。升级 harness
-> 后注意 web UI 结构变化：`scripts/dump-dom.js` 与 `main.js` 的 `MINI_CSS` 均按 rc.8 的
-> `data-slot` 语义（`sidebar` / `details`）适配。
+> ⚠ Maintainer note: `@deepseek-ai/*` **peerDependencies** are not auto-bundled by electron-builder.
+> They must be declared explicitly in the root `package.json` `dependencies` (see `cordis-plugin-group`,
+> `dsh-fs`, `dsh-shell`, `dsh-subprocess`, etc.). After upgrading `@deepseek-ai/dsh`, if the packaged
+> build fails with `ERR_MODULE_NOT_FOUND`, add the missing peer deps as in the dev environment.
+> Currently bundled **`@deepseek-ai/dsh@0.1.0-rc.8`** (and all `dsh-*` sub-packages at the same
+> version). After upgrading harness, note web UI structure changes: `scripts/dump-dom.js` and the
+> `MINI_CSS` in `main.js` follow rc.8's `data-slot` semantics (`sidebar` / `details`).
 
-## 打包
+## Packaging
 
-| 平台 | 命令 | 产物 |
-|------|------|------|
-| macOS | `npm run dist:mac` | `release/*.dmg`、`*.zip`、`.app` |
-| Windows | `npm run dist:win` | `release/*.exe`（NSIS 安装包 + portable 免安装版） |
-| Linux | `npm run dist:linux` | `release/*.AppImage`、`*.deb` |
+| Platform | Command | Output |
+|----------|---------|--------|
+| macOS | `npm run dist:mac` | `release/*.dmg`, `*.zip`, `.app` |
+| Windows | `npm run dist:win` | `release/*.exe` (NSIS + portable) |
+| Linux | `npm run dist:linux` | `release/*.AppImage`, `*.deb` |
 
-- **必须在目标平台上构建**：Windows / Linux 产物必须分别在 Windows / Linux（或 CI）上执行 `npm ci` 后构建。原因是 sharp、koffi、node-addon-require-builtin、landlock 等原生模块以 `optionalDependencies` 按平台安装——在 macOS 上 cross-build 只会打包 darwin 原生二进制，生成的 Windows/Linux 安装包会在启动时因缺少 `*_win32-x64` / `*_linux-x64` 模块而直接崩溃。
-- 推荐使用仓库内置的 GitHub Actions 工作流（`.github/workflows/build.yml`）：三平台矩阵各自在对应 OS 上 `npm ci` + 构建，构建后自动运行 `node scripts/verify-native.mjs` 校验原生模块齐全，再上传产物。
-- 本地可先跑 `node scripts/verify-native.mjs` 快速检查 `release/*-unpacked` 中当前平台的原生模块是否齐全。
-- 应用内已内置 Node 运行时（Electron 的 `ELECTRON_RUN_AS_NODE`），原生模块（node-pty、sharp、koffi 等）均为 N-API prebuild，跨平台可用（前提是按上面要求在各平台安装）。
-- 如需签名/公证，在 electron-builder 配置中补充证书环境变量即可；未签名构建可直接内部分发使用。
+- **Build on the target OS**: Windows/Linux artifacts must be built on their own OS (or CI) after `npm ci`. Native modules (sharp, koffi, node-addon-require-builtin, landlock, etc.) install per-platform via `optionalDependencies` — cross-building from macOS only packages darwin binaries, and the resulting Windows/Linux installers crash at startup for missing `*_win32-x64` / `*_linux-x64` modules.
+- Recommended: use the built-in GitHub Actions workflow (`.github/workflows/build.yml`) — a three-OS matrix runs `npm ci` + build on each OS, verifies native modules with `node scripts/verify-native.mjs`, then uploads artifacts.
+- Locally, run `node scripts/verify-native.mjs` to quickly check that `release/*-unpacked` contains the native modules for the current platform.
+- The app bundles a Node runtime (Electron `ELECTRON_RUN_AS_NODE`); native modules (node-pty, sharp, koffi, etc.) are N-API prebuilds, cross-platform usable (as long as they are installed per-platform as above).
+- For signing/notarization, add certificate env vars to the electron-builder config; unsigned builds are fine for internal distribution.
 
-### 自动发布
+### Auto Release
 
-打 `v*` tag 推送到 GitHub 即触发三平台 CI 构建，并自动创建 GitHub Release 上传三平台安装包（构建成功即自动发布，无需手动确认）。
+Push a `v*` tag to trigger the three-OS CI build and auto-create a GitHub Release with all platform installers (auto-published on success).
 
 ```bash
 git tag v0.1.4 && git push origin v0.1.4
 ```
 
-## 目录结构
+## Directory Layout
 
 ```
-main.js                Electron 主进程：服务编排、局域网反代、鉴权、悬浮球/迷你窗、插件安装
-preload.js             主窗口渲染进程桥接（仅 file: 页面暴露，防止远端页面滥用本机能力）
-renderer/index.html    启动页 + 连接设置 + 插件市场界面
-renderer/floating.*    桌面悬浮球（拖动/点击/右键菜单）
-renderer/mini.*        迷你聊天窗口（webview + 顶部按钮栏 + 快捷指令）
-scripts/native-float.js macOS 原生桥接（koffi + AppKit：悬浮球置顶、迷你窗候选词方案）
-scripts/market.js      插件市场声明式解析引擎 + pnpm 自包含安装器
-scripts/smoke.cjs      冒烟测试（静态检查/服务启动/DOM 渲染/PNPM 自包含）
-scripts/verify-native.mjs  校验打包产物原生模块齐全（CI 使用）
-assets/icons/          应用图标（DeepSeek（默认）/ D娘）
-assets/                界面截图（README 配图）
-build/                 打包用图标
-.github/workflows/build.yml  三平台矩阵构建工作流
+main.js                Electron main process: service orchestration, LAN reverse proxy, auth, floating ball / mini window, plugin install
+preload.js             Main-window renderer bridge (exposed only on file: pages to prevent remote pages abusing local capabilities)
+renderer/index.html    Splash + connection settings + plugin market UI
+renderer/floating.*    Floating ball (drag / click / context menu)
+renderer/mini.*        Mini chat window (webview + toolbar + quick prompts)
+scripts/native-float.js macOS native bridge (koffi + AppKit: floating-ball always-on-top, mini-window IME solution)
+scripts/market.js      Plugin market declarative parsing engine + pnpm self-contained installer
+scripts/smoke.cjs      Smoke tests (static checks / server boot / DOM render / PNPM self-containment)
+scripts/verify-native.mjs  Verify packaged native modules present (CI)
+assets/icons/          App icons (DeepSeek (default) / D娘)
+assets/                UI screenshots (README images)
+build/                 Build icon
+.github/workflows/build.yml  Three-OS matrix build workflow
 ```
 
-## 协议
+## License
 
-MIT。DeepSeek Harness 由 DeepSeek AI 开发，本仓库仅为打包封装。
+MIT. DeepSeek Harness is developed by DeepSeek AI; this repository is a packaging wrapper only.
