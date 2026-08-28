@@ -106,6 +106,9 @@ const MINI_CSS = `
 [data-slot="details"] { display: none !important; }
 [class$="_frame"] { grid-template-columns: 0px 1fr 0px !important; }
 `
+// 迷你窗整体缩放（豆包同款紧凑感）：对话内容字体随之缩小。
+// webview 内容由 dsh web UI 渲染，用 zoom 等比缩小最可靠，无 CSS 破坏。
+const MINI_ZOOM_FACTOR = 0.85
 
 let mainWindow = null
 let tray = null
@@ -2562,6 +2565,7 @@ function setupMiniCssInjection(win) {
     guest.on('dom-ready', () => {
       if (cssKey) guest.removeInsertedCSS(cssKey).catch(() => {})
       guest.insertCSS(MINI_CSS).then((k) => { cssKey = k }).catch(() => {})
+      try { guest.setZoomFactor(MINI_ZOOM_FACTOR) } catch (_) {}
     })
   })
 }
