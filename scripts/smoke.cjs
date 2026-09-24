@@ -47,6 +47,8 @@ function staticChecks() {
   check('MINI_CSS 使用 data-slot 语义', mainSrc.includes('[data-slot="sidebar"]') && mainSrc.includes('[data-slot="details"]'))
   check('spawn 带 --no-open（启动不自动开网页）', /\x27--no-open\x27/.test(mainSrc))
   check('spawnServer 注入 pnpm 垫片 PATH（dsh 网页卸载插件不再报 pnpm not found）', mainSrc.includes('ensurePnpmShims') && /spawnServer[\s\S]*?PATH: shimDir/.test(mainSrc))
+  const marketSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'market.js'), 'utf8')
+  check('Windows pnpm 垫片使用 .cmd 入口', marketSrc.includes("process.platform === 'win32'") && marketSrc.includes("pnpmPath + '.cmd'"))
   check('快捷指令 data/IPC 已实现', mainSrc.includes('DEFAULT_PROMPTS') && mainSrc.includes('dsh:get-prompts') && mainSrc.includes('mini:run-prompt'))
   check('划词唤起已实现', mainSrc.includes('setupSelectionAsk') && mainSrc.includes('params.selectionText') && mainSrc.includes('askWithSelection'))
   const miniSrc = fs.readFileSync(path.join(ROOT, 'renderer/mini.html'), 'utf8') + fs.readFileSync(path.join(ROOT, 'renderer/mini.js'), 'utf8')
@@ -69,7 +71,6 @@ function staticChecks() {
   check('渲染层按远端能力置灰安装按钮', idxHtml.includes("远端不可装"))
   // 原生置顶可撤销（取消置顶在 macOS 生效）
   const nativeFloatSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'native-float.js'), 'utf8')
-  const marketSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'market.js'), 'utf8')
   check('native-float 导出 revertNativeFloatTop', nativeFloatSrc.includes('function revertNativeFloatTop') && nativeFloatSrc.includes('revertNativeFloatTop'))
   check('main 取消置顶撤销原生层级', mainSrc.includes('revertNativeFloatTop'))
   check('悬浮球菜单含隐藏项', mainSrc.includes("label: '隐藏悬浮球'"))
@@ -115,7 +116,8 @@ function marketChecks() {
     const oldSrc = market.normalizeMarketSources([{ id: 'dshmarket', name: 'dsh.market', type: 'dshmarket', url: 'https://dsh.market/plugins.json' }])[0]
     check('旧格式源补全内置 fields/pk', !!(oldSrc.fields && oldSrc.fields.pkg && oldSrc.jsonPath === 'plugins'))
   }
-  const samplesDir = '/tmp/mkt'
+  // 样本随仓库提交，确保开发机和 CI 上结果一致。
+  const samplesDir = path.join(__dirname, 'fixtures', 'market')
   const dshSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'dshmarket')
   const awSrc = market.DEFAULT_MARKET_SOURCES.find((s) => s.id === 'awesome')
   // dsh.market 标准 JSON
@@ -127,7 +129,7 @@ function marketChecks() {
     check('通用扩展字段(meta+numeric/boolean)', list.every((p) => typeof (p.meta && p.meta.score) === 'number') && list.every((p) => typeof (p.meta && p.meta.stars) === 'number') && list.every((p) => typeof (p.meta && p.meta.needsConfig) === 'boolean'))
     check('内置源声明默认排序 defaultSort', market.DEFAULT_MARKET_SOURCES[0].defaultSort && market.DEFAULT_MARKET_SOURCES[0].defaultSort.field === 'score')
   } else {
-    check('dsh.market 样本存在', false, '缺少 /tmp/mkt/plugins.json')
+    check('dsh.market 样本存在', false, `缺少 ${pmFile}`)
   }
   // awesome HTML data-cmd
   const awFile = path.join(samplesDir, 'awesome.html')
@@ -136,7 +138,7 @@ function marketChecks() {
     check('awesome 解析 > 0 个插件', list.length > 0, 'count=' + list.length)
     check('awesome 提取安装包规格', list.some((p) => p.pkg && p.pkg.length > 0))
   } else {
-    check('awesome 样本存在', false, '缺少 /tmp/mkt/awesome.html')
+    check('awesome 样本存在', false, `缺少 ${awFile}`)
   }
 }
 
@@ -212,7 +214,9 @@ async function startDsh() {
 }
 async function stopDsh() {
   if (dshProc && dshProc.exitCode === null) {
-    try { process.kill(-dshProc.pid, 'SIGTERM') } catch (_) { try { dshProc.kill('SIGTERM') } catch (_2) {} }
+    // 该测试子进程不是 detached 进程组 leader；对 -pid 发信号可能命中测试
+    // runner 所在进程组，导致测试在汇总/设置退出码前被终止并错误返回 0。
+    try { dshProc.kill('SIGTERM') } catch (_) {}
     await new Promise((r) => { dshProc.once('exit', r); setTimeout(r, 5000) })
   }
   try { fs.rmSync(dshHome, { recursive: true, force: true }) } catch (_) {}
@@ -302,13 +306,16 @@ app.whenReady().then(async () => {
   const html = await serverChecks()
   if (html) await domChecks()
   else check('跳过 DOM 渲染（服务未就绪）', false)
-  await stopDsh()
 
   const failed = results.filter((r) => !r.ok)
+  // 先固化退出码和输出汇总，再清理子进程；即使 Electron 在清理期间提前
+  // 触发退出，CI 也能收到正确的失败状态。
+  process.exitCode = failed.length ? 1 : 0
   console.log(`\n=== 冒烟测试完成：${results.length - failed.length}/${results.length} 通过，耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s ===`)
   if (failed.length) {
     console.log('失败项：')
     for (const f of failed) console.log(`  ✗ ${f.name}${f.detail ? ' → ' + f.detail : ''}`)
   }
+  await stopDsh()
   app.exit(failed.length ? 1 : 0)
 })

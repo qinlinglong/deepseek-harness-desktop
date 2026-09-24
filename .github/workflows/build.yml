@@ -14,8 +14,25 @@ permissions:
   contents: write
 
 jobs:
+  validate-release:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require tag to match package version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${EXPECTED_TAG}" >&2
+            exit 1
+          fi
+
   build:
     name: Build (${{ matrix.os }})
+    needs: validate-release
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +62,14 @@ jobs:
         # koffi 原生二进制，cpu/os 过滤会拒绝跨架构安装，故强制。
         run: npm ci --force
 
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke
+
+      - name: Smoke test (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: npm run smoke
+
       - name: Build ${{ matrix.os }}
         # 仅打包，不在这里 publish：多 job 并发发布到同一 draft release 存在竞态，
         # 会偶发只有部分平台资产上传成功。统一由下方 release job 发布。
@@ -73,7 +98,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [validate-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

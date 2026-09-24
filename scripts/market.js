@@ -344,13 +344,23 @@ function buildPnpmShims(shimDir, electronPath, pnpmCliPath) {
   require('fs').mkdirSync(shimDir, { recursive: true })
   const e = JSON.stringify(electronPath)
   const c = JSON.stringify(pnpmCliPath)
-  const nodeShim = '#!/bin/sh\n exec ' + e + ' --expose-internals "$@"\n'
-  const pnpmShim = '#!/bin/sh\n DIR="$(cd "$(dirname "$0")" && pwd)"\n exec "$DIR/node" ' + c + ' "$@"\n'
   const fs = require('fs')
   const nodePath = require('path').join(shimDir, 'node')
   const pnpmPath = require('path').join(shimDir, 'pnpm')
-  fs.writeFileSync(nodePath, nodeShim, { mode: 0o755 })
-  fs.writeFileSync(pnpmPath, pnpmShim, { mode: 0o755 })
+  if (process.platform === 'win32') {
+    // Windows does not execute an extensionless file containing a shebang when
+    // spawn("pnpm") resolves it through PATHEXT. Keep the Unix shims for
+    // POSIX platforms and provide real .cmd entry points for Windows.
+    const nodeShim = '@echo off\r\n' + e + ' --expose-internals %*\r\n'
+    const pnpmShim = '@echo off\r\n' + e + ' --expose-internals ' + c + ' %*\r\n'
+    fs.writeFileSync(nodePath + '.cmd', nodeShim)
+    fs.writeFileSync(pnpmPath + '.cmd', pnpmShim)
+  } else {
+    const nodeShim = '#!/bin/sh\n exec ' + e + ' --expose-internals "$@"\n'
+    const pnpmShim = '#!/bin/sh\n DIR="$(cd "$(dirname "$0")" && pwd)"\n exec "$DIR/node" ' + c + ' "$@"\n'
+    fs.writeFileSync(nodePath, nodeShim, { mode: 0o755 })
+    fs.writeFileSync(pnpmPath, pnpmShim, { mode: 0o755 })
+  }
   return shimDir
 }
 

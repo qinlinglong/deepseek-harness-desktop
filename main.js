@@ -90,6 +90,7 @@ const SIGKILL_TIMEOUT_MS = 2500
 const DEBOUNCE_MS = 600
 const STALE_WAIT_MS = 800
 const PROXY_TIMEOUT_MS = 60000
+const PROXY_HTML_MAX_BYTES = 32 * 1024 * 1024
 const PROBE_TIMEOUT_MS = 1200
 const FLOAT_FORCE_REFRESH_INTERVAL_MS = 600
 const READY_POLL_INTERVAL_MS = 600
@@ -1139,6 +1140,9 @@ function startAuthProxy(lanPort, targetPort) {
     // 上游（dsh 服务）卡死时主动超时，避免 LAN socket 无限悬挂
     proxyTimeout: PROXY_TIMEOUT_MS,
     timeout: PROXY_TIMEOUT_MS,
+    // 响应由 proxyRes 统一转发。默认自动 pipe 与 HTML 注入同时使用会把
+    // 同一个响应发送两次，造成 HPE_CLOSED_CONNECTION / 响应损坏。
+    selfHandleResponse: true,
   })
   proxy.on('error', (err, _req, res) => {
     log('main', `proxy web error: ${err.message}`)
@@ -1168,20 +1172,45 @@ function startAuthProxy(lanPort, targetPort) {
     if (req.headers.origin) proxyReq.setHeader('origin', `http://127.0.0.1:${targetPort}`)
   })
   // 给通过代理访问的 HTML 注入 crypto.randomUUID polyfill（修复局域网 IP 访问报错）
-  proxy.on('proxyRes', (proxyRes, _req, res) => {
+  proxy.on('proxyRes', (proxyRes, req, res) => {
     const ct = String(proxyRes.headers['content-type'] || '')
     const ce = String(proxyRes.headers['content-encoding'] || '')
-    if (!ct.includes('text/html') || (ce && ce !== 'identity')) return
+    const shouldInject = req.method !== 'HEAD' && ct.includes('text/html') && (!ce || ce === 'identity')
+    if (!shouldInject) {
+      if (!res.headersSent) res.writeHead(proxyRes.statusCode || 502, proxyRes.statusMessage, proxyRes.headers)
+      proxyRes.pipe(res)
+      return
+    }
     const chunks = []
-    proxyRes.on('data', (c) => chunks.push(c))
+    let total = 0
+    let aborted = false
+    proxyRes.on('data', (c) => {
+      if (aborted) return
+      total += c.length
+      if (total > PROXY_HTML_MAX_BYTES) {
+        aborted = true
+        proxyRes.destroy(new Error('HTML response too large'))
+        if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('Upstream HTML response too large')
+        return
+      }
+      chunks.push(c)
+    })
     proxyRes.on('end', () => {
+      if (aborted) return
       try {
         const html = injectRandomUUIDPolyfill(Buffer.concat(chunks).toString('utf8'))
         const headers = { ...proxyRes.headers }
         delete headers['content-length']
-        if (!res.headersSent) res.writeHead(proxyRes.statusCode, headers)
+        delete headers['transfer-encoding']
+        headers['content-length'] = Buffer.byteLength(html)
+        if (!res.headersSent) res.writeHead(proxyRes.statusCode || 200, proxyRes.statusMessage, headers)
         res.end(html)
-      } catch (_) {}
+      } catch (e) {
+        log('main', `proxy HTML rewrite error: ${e.message}`)
+        if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+        if (!res.writableEnded) res.end('Bad Gateway')
+      }
     })
   })
 

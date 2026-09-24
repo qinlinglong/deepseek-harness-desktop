@@ -1,0 +1,15 @@
+{
+  "plugins": [
+    {
+      "name": "@example/dsh-plugin",
+      "description": "Smoke-test fixture",
+      "version": "1.2.3",
+      "score": { "total": 98 },
+      "stars": 42,
+      "install": {
+        "commands": ["dsh plugin --profile web add @example/dsh-plugin"],
+        "needsConfig": false
+      }
+    }
+  ]
+}
