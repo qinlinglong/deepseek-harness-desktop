@@ -64,7 +64,10 @@ jobs:
 
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm run smoke
+        # GitHub-hosted runners do not preserve Electron's chrome-sandbox
+        # setuid bit after npm install. Smoke tests are isolated CI code, so
+        # run only this test process without the Chromium sandbox.
+        run: xvfb-run -a npm run smoke -- --no-sandbox
 
       - name: Smoke test (macOS / Windows)
         if: runner.os != 'Linux'
